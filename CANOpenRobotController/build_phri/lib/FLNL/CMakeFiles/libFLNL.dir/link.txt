@@ -1,0 +1,2 @@
+/usr/bin/ar qc liblibFLNL.a CMakeFiles/libFLNL.dir/src/baseSocket.cpp.o CMakeFiles/libFLNL.dir/src/client.cpp.o CMakeFiles/libFLNL.dir/src/server.cpp.o
+/usr/bin/ranlib liblibFLNL.a

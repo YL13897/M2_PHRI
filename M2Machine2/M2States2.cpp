@@ -12,22 +12,13 @@
 #include <random>
 
 
-
+// ----------------------------------------------------------------------------
 // Local wall-clock helper for CSV timestamps
 static inline double system_time_sec() {
     using namespace std::chrono;
     return duration_cast<duration<double>>(system_clock::now().time_since_epoch()).count();
 }
 
-// Send a plain-text/structured line back to UI
-void M2ProbMoveState::sendUI_(const std::string& msg) {
-    const int seq = ++this->txSeq_;
-    const size_t L = msg.size();
-
-    if (machine && machine->UIserver) {
-        machine->UIserver->sendCmd(msg);
-    } 
-}
 // Minimum-jerk trajectory helper (position/velocity/optional acceleration)
 static inline double MinJerk(const VM2& X0, const VM2& Xf, double T, double t,
                              VM2& Xd, VM2& dXd, VM2* ddXd=nullptr){
@@ -67,8 +58,10 @@ static inline T clamp_compat(T v, T lo, T hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
 }
 
+
+// ----------------------------------------------------------------------------
 // Begin calibration: enter torque mode and start stop-seek routine
-void M2CalibState::entryCode(void) {
+void M2CalibState::entryCode() {
     calibDone=false;
     for(unsigned int i=0; i<2; i++) {
         stop_reached_time[i] = .0;
@@ -80,7 +73,7 @@ void M2CalibState::entryCode(void) {
     std::cout << "Calibrating (keep clear)..." << std::flush;
 }
 // Drive joints toward stops; apply calibration once conditions met
-void M2CalibState::duringCode(void) {
+void M2CalibState::duringCode() {
     VM2 tau(0, 0);
     VM2 vel=robot->getVelocity();
     double b = 3;
@@ -111,17 +104,18 @@ void M2CalibState::duringCode(void) {
     }
 }
 // Leave with zero force command and compensation active
-void M2CalibState::exitCode(void) {
+void M2CalibState::exitCode() {
     robot->setEndEffForceWithCompensation(VM2::Zero());
 }
-// Enter standby: torque control + open CSV
 
+
+// ----------------------------------------------------------------------------
+// Enter standby: torque control + open CSV
 void M2StandbyState::entryCode() {
     robot->initTorqueControl();
-    openStandbyCSV_();
+    // openStandbyCSV_();
     standbyIter_ = 0;
 }
-
 
 // Idle loop: apply zero force (with compensation), snapshot data, and log sparsely
 void M2StandbyState::duringCode() {
@@ -134,8 +128,8 @@ void M2StandbyState::duringCode() {
     // Snapshot kinematics
     VM2 X  = robot->getEndEffPosition();
     VM2 dX = robot->getEndEffVelocity();
-
     VM2 Fs = robot->getEndEffForce();
+
     // Periodic status print
     if (iterations()%500==1) 
         robot->printStatus();
@@ -144,53 +138,64 @@ void M2StandbyState::duringCode() {
     if (standbyRecording_ && (++standbyIter_ % standbyLogEveryN_ == 0)) {
         const double sys_t = system_time_sec();
         const std::string sid = (machine ? machine->sessionId : std::string("UNSET"));
-        writeStandbyCSV_(running(), sys_t, sid, X, dX, F_cmd, Fs);
+        // writeStandbyCSV_(running(), sys_t, sid, X, dX, F_cmd, Fs);
     }
 }
 // Exit standby: zero force and close CSV
 void M2StandbyState::exitCode() {
     robot->setEndEffForceWithCompensation(VM2::Zero());
-    closeStandbyCSV_();
+    // closeStandbyCSV_();
 }
 
-// Open logs/Standby_<session>.csv (append, create header on first open)
-void M2StandbyState::openStandbyCSV_() {
-    // Append mode to keep a continuous session log
-    // standbyCsv_.open("logs/StandbyLog.csv", std::ios::out | std::ios::app);
-    const std::string sid = (machine && !machine->sessionId.empty()) ? machine->sessionId : std::string("UNSET");
+// // Open logs/Standby_<session>.csv (append, create header on first open)
+// void M2StandbyState::openStandbyCSV_() {
+//     // Append mode to keep a continuous session log
+//     // standbyCsv_.open("logs/StandbyLog.csv", std::ios::out | std::ios::app);
+//     const std::string sid = (machine && !machine->sessionId.empty()) ? machine->sessionId : std::string("UNSET");
 
-    const std::string fname = std::string("logs/Standby_") + sid + ".csv";
+//     const std::string fname = std::string("logs/Standby_") + sid + ".csv";
 
-    standbyCsv_.open(fname, std::ios::out | std::ios::app);
-    if (!standbyCsv_.is_open()) {
-        spdlog::error("Failed to open Standby CSV: {}", fname);
-        return;
-    }
-    if (standbyCsv_.tellp() == 0) {
-        standbyCsv_ << "time,sys_time,session_id,pos_x,pos_y,vel_x,vel_y,fcmd_x,fcmd_y,fs_x,fs_y\n";
-    }
+//     standbyCsv_.open(fname, std::ios::out | std::ios::app);
+//     if (!standbyCsv_.is_open()) {
+//         spdlog::error("Failed to open Standby CSV: {}", fname);
+//         return;
+//     }
+//     if (standbyCsv_.tellp() == 0) {
+//         standbyCsv_ << "time,sys_time,session_id,pos_x,pos_y,vel_x,vel_y,fcmd_x,fcmd_y,fs_x,fs_y\n";
+//     }
+// }
+
+// // Close standby CSV if open
+// void M2StandbyState::closeStandbyCSV_() {
+//     if (standbyCsv_.is_open()) standbyCsv_.close();
+// }
+
+// // Append one row to standby CSV
+// void M2StandbyState::writeStandbyCSV_(double t, double sys_t, const std::string& sid,
+//                                       const VM2& pos, const VM2& vel, const VM2& fcmd, const VM2& fsense) {
+//     if (!standbyCsv_.is_open()) return;
+//     standbyCsv_ << std::fixed << std::setprecision(6)
+//                 << t << "," << sys_t << "," << sid << ","
+//                 << pos(0) << "," << pos(1) << ","
+//                 << vel(0) << "," << vel(1) << ","
+//                 << fcmd(0) << "," << fcmd(1) << ","
+//                 << fsense(0) << "," << fsense(1) << "\n";
+// }
+
+
+
+
+// ----------------------------------------------------------------------------
+
+// Send a plain-text/structured line back to UI
+void M2ProbMoveState::sendUI_(const std::string& msg) {
+    const int seq = ++this->txSeq_;
+    const size_t L = msg.size();
+
+    if (machine && machine->UIserver) {
+        machine->UIserver->sendCmd(msg);
+    } 
 }
-
-// Close standby CSV if open
-void M2StandbyState::closeStandbyCSV_() {
-    if (standbyCsv_.is_open()) standbyCsv_.close();
-}
-
-// Append one row to standby CSV
-void M2StandbyState::writeStandbyCSV_(double t, double sys_t, const std::string& sid,
-                                      const VM2& pos, const VM2& vel, const VM2& fcmd, const VM2& fsense) {
-    if (!standbyCsv_.is_open()) return;
-    standbyCsv_ << std::fixed << std::setprecision(6)
-                << t << "," << sys_t << "," << sid << ","
-                << pos(0) << "," << pos(1) << ","
-                << vel(0) << "," << vel(1) << ","
-                << fcmd(0) << "," << fcmd(1) << ","
-                << fsense(0) << "," << fsense(1) << "\n";
-}
-
-
-
-
 
 // Construct probabilistic move state; machine is used for UI/session utilities
 M2ProbMoveState::M2ProbMoveState(RobotM2* M2, M2Machine* mach, const char* name)
@@ -201,42 +206,14 @@ void M2ProbMoveState::entryCode() {
 
     robot->initTorqueControl();
     robot->setEndEffForceWithCompensation(VM2::Zero(), false);
-    trialEndPositions_.clear();
-    finishedFlag = false;
-    rng.seed(std::random_device{}());
-    openCSV();
-    // Preload logs
-    openPreloadCSVs_();
-    waitBuf_.clear();
-    preloadSatisfied_ = false;
-
-    if (meta_scoreMode == 2) {
-        currentMode = V2_EFFORT_DISTANCE;
-    } else {
-        currentMode = V1_COUNT_SUCCESS;
-    }
-    successfulTrials = 0;
-    totalTrialsV1 = 0;
-    totalScoreV2 = 0.0;
-    totalTrialsV2 = 0;
-
+    // rng.seed(std::random_device{}());
+    
     currentPhase = TO_A;
+    finishedFlag = false;
     initToA = true;
     initTrial = true;
     pendingStart  = false;
-    betweenTrials = false;
-    lastStrtTime  = -1.0;  // reset debounce timer
-
-    injectingUp = false;
-    injectingLeft = false;
-    inBandSince = 0.0;
-    waitHoldLatched_ = false;
-    // Load perturbation forces from CSV
-    loadPerturbationForces();
-    if (randomizeOrBlock == 1) buildDeterministicSchedule_random();
-    else buildDeterministicSchedule();
     softWallEnabled = false;  
-
     atA_notified_ = false;
 }
 
@@ -262,42 +239,6 @@ void M2ProbMoveState::duringCode() {
             std::transform(cu.begin(), cu.end(), cu.begin(), [](unsigned char ch){ return std::toupper(ch); });
 
             
-            if (cu.rfind("HALT", 0) == 0) {
-                finishedFlag = true;
-                if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                machine->UIserver->clearCmd();
-                k_hold = k_hold_cmd; 
-                d_hold = d_hold_cmd;
-                spdlog::info("GLOBAL: HALT -> finishedFlag=1");
-
-                continue;
-            }
-            
-            if (cu.rfind("RSTA", 0) == 0) {
-                currentPhase   = TO_A;
-                initToA        = true;
-                inBandSince    = 0.0;
-                effortIntegral = 0.0;
-                betweenTrials  = false;
-                waitHoldLatched_ = false;
-                if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                machine->UIserver->clearCmd();
-                spdlog::info("GLOBAL: RSTA -> TO_A");
-                continue;
-            }
-            
-            if (cu.rfind("S_PB", 0) == 0 && !a.empty()) {
-                probLeft = clamp_compat(a[0], 0.0, 1.0);
-                BlockID = a[1];
-                if (randomizeOrBlock == 1) buildDeterministicSchedule_random();
-                else buildDeterministicSchedule();
-                if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                machine->UIserver->clearCmd();
-                // spdlog::info("GLOBAL: S_PB applied -> pLeft={:.3f}", currentTrialProb_);
-                spdlog::info("GLOBAL: S_PB applied -> BlockID={}", BlockID);
-                continue;
-            }
-            
             if (cu.rfind("STRT", 0) == 0) {
                 double now = running();
                 if (pendingStart) {
@@ -315,124 +256,7 @@ void M2ProbMoveState::duringCode() {
                 machine->UIserver->clearCmd();
                 spdlog::info("GLOBAL: STRT captured (pendingStart=1, t={:.3f})", now);
                 break; 
-            }
-            
-            if (cu.rfind("S_MD",0)==0 || cu.rfind("S_MT",0)==0 || cu.rfind("S_TS",0)==0) {
-                if (betweenTrials) {
-                    if (cu.rfind("S_MD",0)==0 && !a.empty()) {
-                        meta_scoreMode = (int)std::round(a[0]);
-                        // Immediately apply to the runtime scoring mode so UI and scoring stay consistent
-                        currentMode = (meta_scoreMode == 2) ? V2_EFFORT_DISTANCE : V1_COUNT_SUCCESS;
-                        spdlog::info("BETWEEN-TRIALS: S_MD -> mode={} (currentMode now = {})",
-                                     meta_scoreMode, (currentMode == V2_EFFORT_DISTANCE ? 2 : 1));
-                        if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                    } else if (cu.rfind("S_MT",0)==0 && !a.empty()) {
-                        meta_maxTrials = std::max(1, (int)std::round(a[0]));
-                        spdlog::info("BETWEEN-TRIALS: S_MT -> maxTrials={}", meta_maxTrials);
-                        if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                    } else if (cu.rfind("S_TS",0)==0 && !a.empty()) {
-                        meta_targetSucc = std::max(1, (int)std::round(a[0]));
-                        spdlog::info("BETWEEN-TRIALS: S_TS -> targetSucc={}", meta_targetSucc);
-                        if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                    } else {
-                        if (machine && machine->UIserver) machine->UIserver->sendCmd("ERR ARG");
-                    }
-                } else {
-                    if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
-                    spdlog::warn("PARAM LOCKED: '{}' rejected (phase={}, betweenTrials=0)", cu, (int)currentPhase);
-                }
-                machine->UIserver->clearCmd();
-                continue;
-            }
-            if (cu.rfind("S_SID", 0) == 0 && !a.empty()) {
-                long long sidNum = (long long)std::llround(a[0]);
-                if (machine) machine->sessionId = std::to_string(sidNum);
-                if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                machine->UIserver->clearCmd();
-                spdlog::info("GLOBAL: S_SID -> sessionId={}", (machine ? machine->sessionId : std::string("null")));
-                continue;
-            }
-
-            // // Allow adjusting preload threshold/window from UI
-            // if (cu.rfind("S_PLT",0)==0 && !a.empty()) {
-            //     preloadThresholdN_ = a[0];
-            //     if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-            //     machine->UIserver->clearCmd();
-            //     spdlog::info("GLOBAL: S_PLT -> preloadThresholdN_={}", preloadThresholdN_);
-            //     continue;
-            // }
-            // if (cu.rfind("S_PLW",0)==0 && !a.empty()) {
-            //     preloadWindowSec_ = std::max(0.0, a[0]);
-            //     if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-            //     machine->UIserver->clearCmd();
-            //     // spdlog::info("GLOBAL: S_PLW -> preloadWindowSec_={}", preloadWindowSec_);
-            //     continue;
-            // }
-
-            // Directional constant force update
-            if (cu.rfind("FRC2",0)==0 && a.size() >= 2) {
-
-                // const double F_UP_MIN = 0.0,  F_UP_MAX = 120.0;    // Upward positive
-                // const double F_L_MIN  = -80.0, F_L_MAX  = 0.0;    // Leftward negative
-                // F_const_up   = clamp_compat(a[0], F_UP_MIN, F_UP_MAX);
-                // F_const_left = clamp_compat(a[1], F_L_MIN, F_L_MAX);
-
-                F_const_up = a[0];
-                F_const_left = a[1];
-                if (F_const_left > 0 && trialIsLeft){F_const_left = -F_const_left;} // leftward force must be negative or zero
-                else if (F_const_left < 0 && !trialIsLeft){F_const_left = -F_const_left;} // rightward force must be positive or zero
-                
-                if (machine && machine->UIserver)
-                    machine->UIserver->sendCmd("OK");
-                machine->UIserver->clearCmd();
-                spdlog::info("GLOBAL: FRC2 -> F_const_up={}, F_const_left={}", F_const_up, F_const_left);
-                continue;
-            }
-
-            // Hold stiffness/damping update
-            if (cu.rfind("HLKD",0)==0 && a.size() >= 2) {
-
-                if (waitHoldLatched_) {
-                    // 正在 hold，先排队，等释放后再应用
-                    k_hold_cmd = a[0];
-                    d_hold_cmd = a[1];
-                    // spdlog::info("GLOBAL: HLKD queued (latched) k_hold={}, d_hold={}", k_hold_cmd, d_hold_cmd);
-                } else {
-                    // 不在 hold，立即生效
-                    k_hold_cmd = a[0];
-                    d_hold_cmd = a[1];
-                    k_hold = k_hold_cmd; 
-                    d_hold = d_hold_cmd;
-                    // spdlog::info("GLOBAL: HLKD applied k_hold={}, d_hold={}", k_hold, d_hold);
-                }
-
-
-                if (machine && machine->UIserver)
-                    machine->UIserver->sendCmd("OK");
-                machine->UIserver->clearCmd();
-                // spdlog::info("GLOBAL: HLKD -> k_hold={}, d_hold={}", k_hold_cmd, d_hold_cmd);
-                continue;
-            }
-
-            if (cu.rfind("Q_PB", 0) == 0) { // query pLeft
-                if (randomizeOrBlock == 1){
-                    double pLeft = probLeft;
-                    if (trialSchedule_.empty()) {
-                        buildDeterministicSchedule_random();
-                    }
-                    if (!trialSchedule_.empty()) {
-                        size_t idx = trialIdx_ % trialSchedule_.size();
-                        pLeft = (idx < trialProb_.size()) ? trialProb_[idx] : probLeft;
-                    }
-                    std::vector<double> pLeft_Q;
-                    pLeft_Q.push_back(pLeft);
-                    machine->UIserver->sendCmd("R_PB", {pLeft_Q});
-                    machine->UIserver->clearCmd();
-                    spdlog::info("GLOBAL: Q_PB -> pLeft={:.3f}", pLeft);
-                    continue;
-                }
-            }
-        
+            } 
 
             // If unknown command
             spdlog::warn("GLOBAL: unknown cmd='{}' (trim='{}') @phase={}", c, cu, (int)currentPhase);
@@ -444,6 +268,58 @@ void M2ProbMoveState::duringCode() {
     // === END GLOBAL COMMAND DRAIN ===
     // Phase controller: TO_A -> WAIT_START -> TRIAL
     switch (currentPhase) {
+
+        // In M2States.cpp, inside M2ProbMoveState::duringCode()
+        case WAIT_START: {
+            // Keep recent samples for preload window analysis until STRT is consumed
+            // Sample and maintain rolling buffer
+            {
+                WaitSample s;
+                s.t     = running();
+                s.pos   = robot->getEndEffPosition();
+                s.vel   = robot->getEndEffVelocity();
+                s.force = robot->getEndEffForce();
+            }
+
+            VM2 X = robot->getEndEffPosition();
+            double distToA = (A - X).norm();
+            bool atA_hold = false;           
+            if (distToA < epsA_hold) {
+                if (inBandSince == 0.0) inBandSince = running();
+                else if ((running() - inBandSince) >= holdTimeA) {
+                    atA_hold = true;
+                    if (machine && machine->UIserver && !atA_notified_) {
+                        machine->UIserver->sendCmd("AT_A");  // Send p[0] = currentTrialProb_
+                        atA_notified_ = true;
+                        spdlog::info("WAIT_START: Checked, atA_hold!");
+                    } 
+                }
+            } else {
+                inBandSince = 0.0;
+                atA_notified_ = false;
+            }
+
+            if (pendingStart && atA_hold) {
+                // On STRT: evaluate last preload window and log
+
+                const double tNow = running();
+
+                pendingStart  = false;
+                betweenTrials = false;  
+                currentPhase  = TRIAL;
+                initTrial     = true;
+                
+                if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
+                spdlog::info("WAIT_START: pendingStart consumed -> TRIAL (atA_hold=1)");
+                break; 
+            } else if (pendingStart && !atA_hold) {
+                if (iterations() % 1000 == 1) {
+                    spdlog::info("WAIT_START: STRT pending but not at A (dist={:.3f} <? {:.3f})", distToA, epsA_hold);
+                }
+            }
+
+        }
+
         case TO_A: {
             // This block simulates M2ToAState (move/hold near A)
             if (initToA) {
@@ -485,12 +361,10 @@ void M2ProbMoveState::duringCode() {
                     inBandSince = running();}
                 else if ((running() - inBandSince) >= holdTimeA) {
                     atA_hold = true;
-                    if (machine && machine->UIserver && !atA_notified_) {
-                        std::vector<double> p;
-                        p.push_back(currentTrialProb_);
-                        machine->UIserver->sendCmd("AT_A", p);  // Send p[0] = currentTrialProb_
+                    if (machine && machine->UIserver && !atA_notified_) {         
+                        machine->UIserver->sendCmd("AT_A"); 
                         atA_notified_ = true;
-                        spdlog::info("Checked, atA_hold! pLeft={:.3f}", currentTrialProb_);
+                        spdlog::info("Checked, atA_hold! ");
                     }     
                 }
             } else {
@@ -506,430 +380,11 @@ void M2ProbMoveState::duringCode() {
             }
             break;
         }
-        // In M2States.cpp, inside M2ProbMoveState::duringCode()
-
-        case WAIT_START: {
-            // Keep recent samples for preload window analysis until STRT is consumed
-            // Sample and maintain rolling buffer
-            {
-                WaitSample s;
-                s.t     = running();
-                s.pos   = robot->getEndEffPosition();
-                s.vel   = robot->getEndEffVelocity();
-                s.force = robot->getEndEffForce();
-                waitBuf_.push_back(s);
-                const double tCut = s.t - preloadWindowSec_;
-                while (!waitBuf_.empty() && waitBuf_.front().t < tCut) {
-                    waitBuf_.pop_front();
-                }
-            }
-
-            VM2 X = robot->getEndEffPosition();
-            double distToA = (A - X).norm();
-            bool atA_hold = false;           
-            if (distToA < epsA_hold) {
-                if (inBandSince == 0.0) inBandSince = running();
-                else if ((running() - inBandSince) >= holdTimeA) {
-                    atA_hold = true;
-                    if (machine && machine->UIserver && !atA_notified_) {
-                        std::vector<double> p;
-                        p.push_back(currentTrialProb_);
-                        machine->UIserver->sendCmd("AT_A", p);  // Send p[0] = currentTrialProb_
-                        atA_notified_ = true;
-                        spdlog::info("WAIT_START: Checked, atA_hold! pLeft={:.3f}", currentTrialProb_);
-                    }     
-                
-                }
-            } else {
-                inBandSince = 0.0;
-                atA_notified_ = false;
-            }
-            if (pendingStart && atA_hold) {
-                // On STRT: evaluate last preload window and log
-                // Compute preloadSatisfied_ over the last preloadWindowSec_
-                const double tNow = running();
-                const double tMin = tNow - preloadWindowSec_;
-                // bool windowCovered = (!waitBuf_.empty() && waitBuf_.front().t <= tMin);
-                bool windowCovered = (!waitBuf_.empty());
-                // bool allAbove = true;
-                bool allAbove;
-
-                double sumNorm = 0.0;
-                int count = 0;
-                for (const auto& s : waitBuf_) {
-                    if (s.t < tMin) continue;
-
-                    double fn = s.force.head<2>().norm();
-                    sumNorm += fn;
-                    count++;}
-                    // if (s.force(0) < preloadThresholdN_) { allAbove = false; break; }
-
-                    // if (s.force.head<2>().norm() < preloadThresholdN_) { 
-                        
-                    //     allAbove = false; break; 
-                    // }
-                    if (count > 0) {
-                        double meanNorm = sumNorm / count;
-                        spdlog::info("meanNorm ={:.3f}", meanNorm);
-                        allAbove = (meanNorm >= preloadThresholdN_);}
-                
-                preloadSatisfied_ = (windowCovered && allAbove);
-
-                // Determine upcoming trial index for current mode
-                int nextTrialIdx = (currentMode == V1_COUNT_SUCCESS) ? totalTrialsV1 : totalTrialsV2;
-                writePreloadWindow_(nextTrialIdx, tNow, (currentMode == V1_COUNT_SUCCESS ? 1 : 2), preloadSatisfied_);
-                // writeTrialTag_(nextTrialIdx, (currentMode == V1_COUNT_SUCCESS ? 1 : 2), preloadSatisfied_, tNow);
-
-                pendingStart  = false;
-                betweenTrials = false;  
-                currentPhase  = TRIAL;
-                initTrial     = true;
-                waitHoldLatched_ = false; // release A hold when trial begins
-                if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                spdlog::info("WAIT_START: pendingStart consumed -> TRIAL (atA_hold=1)");
-                break; 
-            } else if (pendingStart && !atA_hold) {
-                
-                if (iterations() % 1000 == 1) {
-                    spdlog::info("WAIT_START: STRT pending but not at A (dist={:.3f} <? {:.3f})", distToA, epsA_hold);
-                }
-            }
-
-
-            // 在 WAIT_START 分支内，日志前取当前力
-            VM2 F_wait = waitBuf_.empty() ? VM2::Zero() : waitBuf_.back().force;
-            double F_wait_norm = F_wait.norm();
-            
-            if (iterations() % 1000 == 1) {
-                spdlog::info(
-                    "WAIT_START cfg: pLeft={:.3f}, mode={}, targetSucc={}, maxTrials={}, V1={}/{}, V2Score={:.3f}({}), finishedFlag={}",
-                    currentTrialProb_, meta_scoreMode, meta_targetSucc, meta_maxTrials,
-                    successfulTrials, totalTrialsV1, totalScoreV2, totalTrialsV2,
-                    finishedFlag ? 1 : 0
-                );
-
-                spdlog::info("F=({:.3f},{:.3f}), |F|={:.3f}", F_wait(0), F_wait(1), F_wait_norm);
-            }
-
-            if (atA_hold) {
-                waitHoldLatched_ = true;
-            }
-
-
-            if (waitHoldLatched_) {
-                
-                VM2 Xh  = robot->getEndEffPosition();
-                VM2 dXh = robot->getEndEffVelocity();
-                Eigen::Matrix2d K = Eigen::Matrix2d::Identity() * k_hold;
-                Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * d_hold;
-                if (!hold_log_once) {
-                    spdlog::info("HLKD -> k_hold={}, d_hold={}", k_hold, d_hold);
-                    hold_log_once = true; 
-                }
-                VM2 F_hold = K * (A - Xh) + D * (VM2::Zero() - dXh);
-                applyForce(F_hold);  
-            } else {
-                hold_log_once = false;
-                // robot->setEndEffForceWithCompensation(VM2::Zero());
-                this->applyForce(VM2::Zero());
-            }
-  
-            break;
-        }
 
         case TRIAL: {
-            // This block simulates M2TrialState (apply internal force, score, log)
-            if (initTrial) {
-                // Simulate entryCode() for TRIAL
-                trialStartTime = running();
-                decideInternalForceDirection();
-                effortIntegral = 0.0;
-                rawEffortIntegral = 0.0;
-                
-                if (injectingUp)       baselineImpulseN = 0;   // default value 4000;
-                else if (injectingLeft) baselineImpulseN = 0;  // default value 5270;
-                else                    baselineImpulseN = 0.0;  
 
-                if (machine && machine->UIserver) {
-                    std::ostringstream oss;
-                    oss.setf(std::ios::fixed);
-                    oss.precision(3);
-                    int curTrialForMode = (currentMode == V1_COUNT_SUCCESS) ? totalTrialsV1 : totalTrialsV2;
-                    oss << "TRIAL_BEGIN t=" << trialStartTime
-                        << " dir=" << (internalForce(0) < -1e-9 ? "SIDE" : (internalForce(1) > 1e-9 ? "UP" : "NONE"))
-                        << " pLeft=" << currentTrialProb_
-                        << " mode=" << (currentMode == V1_COUNT_SUCCESS ? 1 : 2)
-                        << " cur_trial=" << curTrialForMode
-                        << " max_trial=" << meta_maxTrials;
-                    // Tag preload (0/1) evaluated in WAIT_START
-                    oss << " preload=" << (preloadSatisfied_ ? 1 : 0);
-                    std::string outBegin = oss.str();
-                    sendUI_(outBegin);
-                    {
-                        std::vector<double> p;
-                        int dirCode = (internalForce(0) < -1e-9) ? -1 : ((internalForce(1) > 1e-9) ? 1 : 0);
-                        int curTrialForMode = (currentMode == V1_COUNT_SUCCESS) ? totalTrialsV1 : totalTrialsV2;
-                        p.push_back(trialStartTime);                             // t
-                        p.push_back((double)dirCode);                            // dirCode
-                        // p.push_back(probLeft);                                   // pLeft
-                        p.push_back(currentTrialProb_); 
-                        p.push_back((double)(currentMode == V1_COUNT_SUCCESS ? 1 : 2)); // mode
-                        p.push_back((double)curTrialForMode);                    // cur
-                        p.push_back((double)meta_maxTrials);                     // max
-                        machine->UIserver->sendCmd("TRBG", p);
-                        spdlog::info("TRBBBBB");
-                    }
-                }
-                spdlog::info(
-                    "TRIAL_BEGIN cfg: pLeft={:.3f}, mode={}, targetSucc={}, maxTrials={}, V1={}/{}, V2Score={:.3f}({})",
-                    // probLeft,
-                    currentTrialProb_,
-                    meta_scoreMode,
-                    meta_targetSucc,
-                    meta_maxTrials,
-                    successfulTrials,
-                    totalTrialsV1,
-                    totalScoreV2,
-                    totalTrialsV2
-                );
-                initTrial = false;
-            }
-
-            VM2 X = robot->getEndEffPosition();
-            VM2 dX = robot->getEndEffVelocity();
-
-            double n = (C - X).norm(); // distance to target C
-            double tTrial = running() - trialStartTime;
-
-            // Guard: do not declare success in the first 80 ms to avoid dur=0 "instant success"
-            const double minTrialEvalTime = 0.08;
-
-            // Transition condition check
-            // bool reachedC = (n < epsC) && (tTrial >= minTrialEvalTime);
-            bool reachedC = (n < epsC) && (tTrial >= minTrialEvalTime) && X(1) < (C[1]+ epsC); // also require not too high
-            // bool timeout = (tTrial >= (trialMaxTime + trialExtendTime));
-            bool timeout = (tTrial >= (trialMaxTime));
-            bool timeoutTrial = (tTrial >= trialMaxTime);
-
-
-            // === Recorded-perturbation replay (frame-by-frame) ===
-            VM2 F_int = VM2::Zero();
-
-            if (trialIsLeft){
-                F_const_left = -std::abs(F_const_left);
-            }else{
-                F_const_left = std::abs(F_const_left);
-            }
-
-            // -------------------- Internal force -------------------------
-            if (injectingUp) {
-                // if (!reachedC && timeoutTrial==false) {
-                if (timeoutTrial==false) {
-                // Apply upward perturbation only until target is reached
-                    F_int(1) = F_const_up;
-                } else {                
-                // After reaching target, stop perturbation
-                    F_int.setZero();
-            }
-            } 
-
-            else if (injectingLeft) {
-        
-                if (!reachedC && timeoutTrial==false) {
-                        F_int(0) = F_const_left;
-                        // spdlog::info("F_int(0) = {:.3f}", F_int(0));
-                    }
- 
-                else {
-                        F_int.setZero();
-                }
-            }
-
-
-            // -------------------- End internal force safety boundary -------------------------
-            VM2 F_cmd = F_int + impedance(robot->getEndEffPosition(), X, dX);
-
-            applyForce(F_cmd);
-            // --- Effort calculation based on commanded force (Standby-style) ---
-            VM2 F_user = robot->getEndEffForce();  // sensor-measured interaction force
-            const double Fu_norm = F_user.norm();
-            const double vv = dX.norm();
-            rawEffortIntegral += Fu_norm * vv;
-            
-            
-
-            effortIntegral = 0.05*std::abs(rawEffortIntegral - baselineImpulseN);
-            if(effortIntegral < 3)effortIntegral = 0;
-
-
-            writeCSV(running(), X, dX, F_int, F_user, effortIntegral);
-
-
-            if (iterations() % 1000 == 1) {
-                spdlog::info(
-                    "TRIAL status: t={:.3f}, n={:.3f}, effort={:.3f}, pLeft={:.3f}, mode={}, targetSucc={}, maxTrials={}",
-                    (running() - trialStartTime),
-                    n,
-                    effortIntegral,
-                    // probLeft,
-                    currentTrialProb_,
-                    meta_scoreMode,
-                    meta_targetSucc,
-                    meta_maxTrials
-                );
-            }
-
-            VM2 X_end = robot->getEndEffPosition();   
-            double dist_end = n;                      
-
-            trialEndPositions_.push_back(X_end);      
-
-            const double now = running();
-            // if ((!sendPosOnlyOnTimeout_ || timeout) &&(lastTrpsT_ <0.0 || (now -lastTrpsT_) >=trpsMinInterval_)){
-            if (timeout || reachedC && (lastTrpsT_ < 0.0 || (now - lastTrpsT_) >= trpsMinInterval_)) {
-                
-                if (machine && machine->UIserver) {
-                    std::vector<double> q;
-                    int curTrialIdx = (currentMode == V1_COUNT_SUCCESS) ? totalTrialsV1+1 : totalTrialsV2+1;
-                    q.push_back((double)curTrialIdx);        
-                    q.push_back(X_end(0));                   
-                    q.push_back(X_end(1));                   
-                    q.push_back(dist_end);                   
-                    q.push_back(timeout ? 1.0 : 0.0);        
-                    machine->UIserver->sendCmd("TRPS", q); 
-                    spdlog::info("TRPPPP");
-                    lastTrpsT_ = now;
-
-                }
-
-
-                {
-                    std::ostringstream oss;
-                    oss.setf(std::ios::fixed); oss.precision(3);
-                    oss << "TRIAL_POS t=" << running()
-                        << " end=(" << X_end(0) << "," << X_end(1) << ")"
-                        << " dist=" << dist_end
-                        << " timeout=" << (timeout ? 1 : 0);
-                        spdlog::info("EndPosX={}, EndPosY={}", X_end(0), X_end(1));
-
-                    sendUI_(oss.str());
-                }
-            }
-            
-
-
-
-            if (timeout) {
-                // Scoring logic is now handled here directly
-                double trialScore = 0;
-
-                if (currentMode == V1_COUNT_SUCCESS) {
-                    totalTrialsV1++;
-                    if (reachedC) {
-                        successfulTrials++;
-                        trialScore = 1; // V1 score: 1 for success, 0 for fail
-                    }
-                    if (successfulTrials >= meta_targetSucc || totalTrialsV1 >= meta_maxTrials) finishedFlag = true;
-                } else { // V2_EFFORT_DISTANCE
-                    totalTrialsV2++;
-                    const double S_max = 110.0;
-
-                    const double baseScore = S_max - 210 * n - 0.5*effortIntegral;
-                    
-                    trialScore = baseScore;
-                    totalScoreV2 += trialScore;
-                    if (totalTrialsV2 >= meta_maxTrials) finishedFlag = true;
-                }
-
-                if (machine && machine->UIserver) {
-                    std::ostringstream oss;
-                    oss.setf(std::ios::fixed);
-                    oss.precision(3);
-                    oss << "TRIAL_END t=" << running() << " dur=" << tTrial
-                        // << " reached=" << (reachedC ? 1 : 0)
-                        << " reached=" << (reachedC ? 1 : 0)
-                        << " dist=" << n
-                        << " effort=" << effortIntegral
-                        << " trialScore=" << trialScore
-                        << " dir=" << (internalForce(0) < -1e-9 ? "SIDE" : (internalForce(1) > 1e-9 ? "UP" : "NONE"))
-                        // << " pLeft=" << probLeft
-                        << " pLeft=" << currentTrialProb_
-                        << " mode=" << (currentMode == V1_COUNT_SUCCESS ? 1 : 2);
-                    int curTrial = (currentMode == V1_COUNT_SUCCESS) ? totalTrialsV1 : totalTrialsV2;
-                    oss << " cur_trial=" << curTrial
-                        << " max_trial=" << meta_maxTrials;
-                    if (currentMode == V1_COUNT_SUCCESS) {
-                        oss << " v1_suc=" << successfulTrials
-                            << " v1_tar=" << meta_targetSucc;
-                    } else {
-                        oss << " v2_sco=" << totalScoreV2;
-                    }
-                    std::string out = oss.str();
-                    //sendUI_(out);
-                    {
-                        std::vector<double> p;
-                        int dirCode = (internalForce(0) < -1e-9) ? -1 : ((internalForce(1) > 1e-9) ? 1 : 0);
-                        int curTrial = (currentMode == V1_COUNT_SUCCESS) ? totalTrialsV1 : totalTrialsV2;
-
-                        p.push_back(running());               // t
-                        p.push_back(tTrial);                  // dur
-                        p.push_back(reachedC ? 1.0 : 0.0);   // reached
-                        p.push_back(n);                       // dist
-                        p.push_back(effortIntegral);          // effort
-                        p.push_back(trialScore);              // trialScore
-                        p.push_back((double)(currentMode == V1_COUNT_SUCCESS ? 1 : 2)); // mode
-                        p.push_back((double)curTrial);        // cur
-                        p.push_back((double)meta_maxTrials);  // max
-                        if (currentMode == V1_COUNT_SUCCESS) {
-                            p.push_back((double)successfulTrials); // v1_suc
-                            p.push_back((double)meta_targetSucc);  // v1_tar
-                            p.push_back(0.0);                      // v2_sco placeholder
-                        } else {
-                            p.push_back(0.0);                      // v1_suc placeholder
-                            p.push_back(0.0);                      // v1_tar placeholder
-                            p.push_back(totalScoreV2);             // v2_sco
-                        }
-                        p.push_back((double)dirCode);              // dirCode（可选）
-                        machine->UIserver->sendCmd("TREN", p);
-                        spdlog::info("TREEEEEE");
-                        std::ostringstream log;
-                        log << "[TREN SEND] ("
-                            << "t=" << p[0] << ", dur=" << p[1]
-                            << ", reached=" << p[2] << ", dist=" << p[3]
-                            << ", effort=" << p[4] << ", trialScore=" << p[5]
-                            << ", mode=" << p[6] << ", cur=" << p[7]
-                            << ", max=" << p[8]
-                            << ", v1_suc=" << p[9] << ", v1_tar=" << p[10]
-                            << ", v2_sco=" << p[11]
-                            << ", dirCode=" << p.back() << ")";
-                        spdlog::info("{}", log.str());
-                        
-                    }
-                }
-                if (!finishedFlag) {
-                    // Optionally reset perturbation injection state
-                    injectingUp = false;
-                    injectingLeft = false;
-                    // Stay in ProbMove but go back to WAIT_START to await explicit STRT.
-                    currentPhase    = WAIT_START;
-                    betweenTrials   = true;      // allow param changes between trials
-                    initTrial       = true;     // prepare for a fresh TRIAL init when STRT arrives
-                    inBandSince     = 0.0;      // reset hold timer
-                    effortIntegral  = 0.0;      // reset effort accumulator for next trial
-                    // reset preload state/buffer for next trial
-                    waitBuf_.clear();
-                    preloadSatisfied_ = false;
-                    spdlog::info("TRIAL: finished (reachedC={}, timeout={}) -> WAIT_START. Awaiting STRT.", reachedC, timeout);
-                    double trenSendTime_ = running();
-                    // if ((running() - trenSendTime_) < 0.02 ) {
-                    //      
-                    // }   
-                    return;  // important: exit now to avoid any further TRIAL computations this frame
-                }
-
-            }
-            break;
         }
+
     }
 }
 
@@ -962,8 +417,6 @@ void M2ProbMoveState::exitCode() {
     }
 }
 
-
-
 // ... impedance, readUserForce, etc. methods remain the same ...
 VM2 M2ProbMoveState::impedance(const VM2& X0, const VM2& X, const VM2& dX, const VM2& dXd) {
     Eigen::Matrix2d K = Eigen::Matrix2d::Identity() * k;
@@ -988,393 +441,3 @@ VM2 M2ProbMoveState::readUserForce() {
 }
 
 
-void M2ProbMoveState::decideInternalForceDirection() {
-    if (trialSchedule_.empty()) {
-        if (randomizeOrBlock == 1) buildDeterministicSchedule_random();
-        else buildDeterministicSchedule();
-    }
-    if (trialSchedule_.empty()) {
-        spdlog::error("trialSchedule_ empty after build; fallback to UP");
-        internalForce = VM2(0.0, +robotForceMagUp);
-        injectingLeft = false; injectingUp = true;
-        currentTrialProb_ = probLeft; currentTrialDir_ = +1;
-        return;
-    }
-
-    size_t idx = trialIdx_ % trialSchedule_.size();
-    int dirFlag = trialSchedule_[idx];
-    currentTrialProb_ = (idx < trialProb_.size()) ? trialProb_[idx] : probLeft;
-    currentTrialDir_  = dirFlag;
-    ++trialIdx_;
-
-    internalForce = (dirFlag < 0) ? VM2(-robotForceMagLeft, 0.0)
-                                  : VM2(0.0, +robotForceMagUp);
-    injectingLeft = internalForce(0) < -1e-9;
-    injectingUp   = internalForce(1) >  1e-9;
-    spdlog::info("TRIAL direction ({}): {} p={:.3f}",
-                 (randomizeOrBlock == 1 ? "random" : "deterministic"),
-                 (dirFlag < 0 ? "SIDE" : "UP"),
-                 currentTrialProb_);
-}
-
-
-
-void M2ProbMoveState::resetToAPlan(const VM2& Xnow) {
-    Xi = Xnow;
-    t0_toA = running();
-    inBandSince = 0.0;
-}
-
-void M2ProbMoveState::resetToAIntegrators() {
-    iErrToA.setZero();
-}
-
-void M2ProbMoveState::dumpScheduleCSV_(const std::vector<int>& dir,
-                                       const std::vector<double>& prob) {
-    const std::string sid   = (machine && !machine->sessionId.empty()) ? machine->sessionId : "UNSET";
-    const std::string fname = std::string("logs/Schedule_") + sid + ".csv";
-    std::ofstream f(fname, std::ios::out);
-    if (!f.is_open()) {
-        spdlog::error("Failed to open schedule CSV: {}", fname);
-        return;
-    }
-    f << "trialIndex,dir,prob\n";
-    for (size_t i = 0; i < dir.size(); ++i) {
-        double p = (i < prob.size()) ? prob[i] : probLeft;
-        f << i+1 << "," << dir[i] << "," << p << "\n";
-    }
-    f.close();
-}
-
-
-
-void M2ProbMoveState::buildDeterministicSchedule() {
-    trialSchedule_.clear();
-    // const int seed = 1111111;
-    // const int seed = 1456070;
-    // const int seed = 1661471;
-    const int total = 10;
-    
-    const double eps = 1e-3;
-    // 0% case：all UP(+1)
-    if (probLeft <= eps) {                 
-        trialSchedule_.assign(total, +1);
-        trialIdx_ = 0;
-        
-        return;
-    }
-    // 100% case：all LEFT(-1)  
-    if (probLeft >= 1.0 - eps) {           
-        trialSchedule_.assign(total, -1);
-        trialIdx_ = 0;
-        
-        return;
-    }
-    
-    int leftCount = static_cast<int>(std::round(probLeft * static_cast<double>(total)));
-    leftCount = std::max(1, std::min(total - 1, leftCount));
-
-    
-    std::vector<int> schedule(total, +1);
-    for (int i = 0; i < leftCount; ++i) schedule[i] = -1;
-
-    // seed 
-    std::mt19937_64 rng(seed);
-    spdlog::info("[SCHEDULE] Building seeded schedule with seed={}", seed);
-
-    auto is_strict_alternating = [&](const std::vector<int>& v) -> bool {
-        
-        for (int i = 0; i < total; ++i) {
-            if (v[i] == v[(i + 1) % total]) return false;
-        }
-        return true;
-    };
-
-    
-    const bool fifty_fifty = (leftCount * 2 == total);
-    int attempts = 0;
-    const int max_attempts = 64; 
-
-    do {
-        std::shuffle(schedule.begin(), schedule.end(), rng);
-        attempts++;
-        
-        if (!(fifty_fifty && is_strict_alternating(schedule))) break;
-    } while (attempts < max_attempts);
-
-    trialSchedule_ = std::move(schedule);
-    trialIdx_ = 0;
-
-    trialProb_.assign(trialSchedule_.size(), probLeft);
-
-    spdlog::info("[SCHEDULE] Built seeded schedule (total={}, leftCount={}, seed={}, attempts={})",
-                 total, leftCount, seed, attempts);
-}
-
-
-
-void M2ProbMoveState::buildDeterministicSchedule_random() {
-
-
-    trialSchedule_.clear();
-    trialProb_.clear();
-    const int totalTrials = 100;          // 总 trial
-    const int blockSize = 10;             // 每个 block trial 数
-    const std::vector<double> probList{0.1, 0.3, 0.5, 0.7, 0.9};
-    const int n = probList.size();
-
-
-    // 特殊 BlockID 处理
-    if (BlockID == 0) {
-        trialSchedule_.assign(blockSize, +1);  // 全向前
-        trialProb_.assign(blockSize, 0.0);
-        return;
-    }
-    if (BlockID == 100) {
-        trialSchedule_.assign(blockSize, -1);  // 全向左
-        trialProb_.assign(blockSize, 1.0);
-        return;
-    }
-
-
-    if (fullDir_.empty()) {
-
-        // Step 1：生成每个概率对应 trial
-        std::vector<int> trialScheduleFull;
-        std::vector<double> trialProbFull;
-        trialScheduleFull.reserve(totalTrials);
-        trialProbFull.reserve(totalTrials);
-
-        for (double p : probList) {
-            int numTrials = totalTrials / n;                 // 每个概率出现次数
-            int numLeft = static_cast<int>(std::round(p * numTrials));
-            int numForward = numTrials - numLeft;
-
-            for (int i = 0; i < numLeft; ++i) {
-                trialScheduleFull.push_back(-1);
-                trialProbFull.push_back(p);
-            }
-            for (int i = 0; i < numForward; ++i) {
-                trialScheduleFull.push_back(+1);
-                trialProbFull.push_back(p);
-            }
-        }
-
-        // Step 2：随机打乱整个序列
-        std::mt19937_64 rng(seed);
-        std::vector<size_t> indices(trialScheduleFull.size());
-        std::iota(indices.begin(), indices.end(), 0);
-        std::shuffle(indices.begin(), indices.end(), rng);
-
-        std::vector<int> trialScheduleShuffled;
-        std::vector<double> trialProbShuffled;
-        trialScheduleShuffled.reserve(totalTrials);
-        trialProbShuffled.reserve(totalTrials);
-
-        for (size_t idx : indices) {
-            trialScheduleShuffled.push_back(trialScheduleFull[idx]);
-            trialProbShuffled.push_back(trialProbFull[idx]);
-        }
-
-        fullDir_  = trialScheduleShuffled;
-        fullProb_ = trialProbShuffled;
-
-        dumpScheduleCSV_(trialScheduleShuffled, trialProbShuffled);
-    }
-    else {
-        spdlog::info("[SCHEDULE] Using cached full schedule for BlockID={}", BlockID);
-    }
-    // Step 3：根据 BlockID 取当前 block
-    int numBlocks = totalTrials / blockSize;
-    if (BlockID < 1 || BlockID > numBlocks) {
-        BlockID = 1;
-    }
-    int startIdx = (BlockID - 1) * blockSize;
-
-    trialSchedule_.assign(fullDir_.begin() + startIdx,
-                          fullDir_.begin() + startIdx + blockSize);
-    trialProb_.assign(fullProb_.begin() + startIdx,
-                       fullProb_.begin() + startIdx + blockSize);
-
-    spdlog::info("[SCHEDULE] BlockID={}, blockSize={}, seed={}", BlockID, blockSize, seed);
-}
-
-
-
-// Open logs/M2ProbMove_<session>.csv and write header if new
-void M2ProbMoveState::openCSV() {
-    // csv.open("logs/M2ProbMoveState.csv", std::ios::out | std::ios::app);
-    const std::string sid = (machine && !machine->sessionId.empty()) ? machine->sessionId : std::string("UNSET");
-
-    const std::string fname = std::string("logs/M2ProbMove_") + sid + ".csv";
-
-    csv.open(fname, std::ios::out | std::ios::app);
-    if (!csv.is_open()) {
-        spdlog::error("Failed to open ProbMove CSV: {}", fname);
-        return;
-    }
-    if (csv.tellp() == 0) {
-        // MODIFIED: Added effort to CSV header
-        csv << "time,sys_time,session_id,pos_x,pos_y,vel_x,vel_y,internal_fx,internal_fy,user_fx,user_fy,prob_left,trial_dir,target_succ,max_trials,effort\n";
-    }
-}
-
-// MODIFIED: Added effort to CSV logging
-// Append one row to ProbMove CSV (incl. effort)
-void M2ProbMoveState::writeCSV(double t, const VM2& pos, const VM2& vel,
-    const VM2& fInternal, const VM2& fUser, double effort) {
-    if (!csv.is_open()) return;
-    const double sys_t = system_time_sec();
-    const std::string sid = (machine ? machine->sessionId : std::string("UNSET"));
-    csv << std::fixed << std::setprecision(6)
-        << t << "," << sys_t << "," << sid << ","
-        << pos(0) << "," << pos(1) << ","
-        << vel(0) << "," << vel(1) << ","
-        << fInternal(0) << "," << fInternal(1) << ","
-        << fUser(0) << "," << fUser(1) << ","
-        << currentTrialProb_ << ","
-        << currentTrialDir_ << ","
-        << meta_targetSucc << ","
-        << meta_maxTrials << ","
-        << effort << "\n";
-}
-
-
-void M2ProbMoveState::applyForce(const VM2& F) {
-
-    // const double x_min = 0.10;   // left boundary (m)
-    // const double x_max = 0.55;   // left boundary (m)
-    // const double k_wall = 1800.0; // wall stiffness N/m
-    // const double d_wall = 50.0;  // wall damping N·s/m
-    // const double y_max = 0.35;   // upper boundary (m)
-
-    VM2 F_cmd = F;
-
-    if (softWallEnabled) {
-        //  read current position and velocity
-        VM2 X  = robot->getEndEffPosition();
-        VM2 dX = robot->getEndEffVelocity();
-
-
-        // left wall
-        if (X(0) < x_min) {
-            double pen = x_min - X(0);
-            double F_wall = k_wall * pen - d_wall * dX(0);
-            if (F_wall > 0.0) F_cmd(0) += F_wall;
-        }
-        // right wall
-        if (X(0) > x_max) {
-            double pen = X(0) - x_max;
-            double F_wall = k_wall * pen + d_wall * dX(0);
-            if (F_wall > 0.0) F_cmd(0) -= F_wall;
-        }
-
-        // upper wall
-        if (X(1) > y_max) {
-        double penY = X(1) - y_max;   // penetration depth (upper wall)
-            double F_wall_y = k_wall * penY + d_wall * dX(1);  
-            // Only apply when pushing into the wall
-            if (F_wall_y > 0.0) F_cmd(1) -= F_wall_y;   // push downward
-        }
-    }
-
-    // Clamp forces
-    for (int i=0; i<2; ++i)
-        F_cmd(i) = clamp_compat(F_cmd(i), -forceSaturation, forceSaturation);
-
-    robot->setEndEffForceWithCompensation(F_cmd, true);
-}
-
-
-
-// --- CSV perturbation force loading helpers ---
-
-// Load hard-coded perturbation force sequences (UP and LEFT)
-void M2ProbMoveState::loadPerturbationForces() {
-
-
-    for(int i=0;i<500;i++){
-        upPerturbForce2.push_back(F_const_up);
-        if (F_const_left > 0 && trialIsLeft){ F_const_left = -F_const_left;}
-        else if (F_const_left <0 && !trialIsLeft){ F_const_left = -F_const_left;}
-        leftPerturbForce2.push_back(F_const_left);
-    }
-
-
-
-    spdlog::info("[STATIC] Loaded {} up and {} left perturbation samples (hard-coded).", upPerturbForce.size(), leftPerturbForce.size());
-}
-
-
-
-// --- Preload CSV helpers ---
-void M2ProbMoveState::openPreloadCSVs_() {
-    const std::string sid = (machine && !machine->sessionId.empty())
-                                ? machine->sessionId
-                                : std::string("UNSET");
-
-    const std::string fname = std::string("logs/Preload_") + sid + ".csv";
-
-    preloadCsv_.open(fname, std::ios::out | std::ios::app);
-
-    if (preloadCsv_.is_open() && preloadCsv_.tellp() == 0) {
-        preloadCsv_ << "time,sys_time,session_id,mode,trial,"
-                    << "fx,fy,pos_x,pos_y,vel_x,vel_y,prob_left,"
-                    << "preload_flag,trial_dir\n";
-    }
-}
-
-
-
-void M2ProbMoveState::closePreloadCSVs_() {
-    if (preloadCsv_.is_open())  preloadCsv_.close();
-}
-
-
-
-double M2ProbMoveState::computeFxMin_(double tNow) {
-    const double tMin = tNow - preloadWindowSec_;
-    double fx_min = std::numeric_limits<double>::infinity();
-
-    for (const auto& s : waitBuf_) {
-        if (s.t < tMin) continue;
-        fx_min = std::min(fx_min, s.force(0));
-    }
-    if (!std::isfinite(fx_min))
-        fx_min = 0.0;
-    return fx_min;
-}
-
-
-
-void M2ProbMoveState::writePreloadWindow_(int trialIdxForMode,
-                                          double tNow, int mode,
-                                          bool preloadFlag)
-{
-    if (!preloadCsv_.is_open()) return;
-
-    const double sys_t = system_time_sec();
-    const std::string sid = (machine ? machine->sessionId : std::string("UNSET"));
-    // const int mode = (currentMode == V1_COUNT_SUCCESS ? 1 : 2);
-    const double tMin = tNow - preloadWindowSec_;
-    const double fx_min = computeFxMin_(tNow);
-
-    //  Write all samples in the preload window
-    for (const auto& s : waitBuf_) {
-        if (s.t < tMin) continue;
-
-        preloadCsv_ << std::fixed << std::setprecision(6)
-            << s.t << "," << sys_t << "," << sid << ","
-            << mode << "," << (trialIdxForMode+1) << ","
-            << s.force(0) << "," << s.force(1) << ","
-            << s.pos(0) << "," << s.pos(1) << ","
-            << s.vel(0) << "," << s.vel(1) << ","
-            // << probLeft << ","
-            << currentTrialProb_ << ","
-            // << preloadThresholdN_ << "," << preloadWindowSec_ << ","
-            << (preloadFlag ? 1 : 0)       // extra: preload success flag
-            // << ","<< fx_min 
-            << currentTrialDir_ << ","  // extra: trial direction
-            << "\n";                    // extra: fx_min
-    }
-}

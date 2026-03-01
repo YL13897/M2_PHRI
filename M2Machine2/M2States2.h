@@ -137,20 +137,11 @@ public:
 
 
     // --- WAIT_START hold-at-A configuration ---
-    bool waitHoldLatched_ = false;  
     double k_hold = 1000.0; // Default 350        
     double d_hold = 35.0;            
 
     double k_hold_cmd = 1000.0; // Default 350
     double d_hold_cmd = 35.0;
-
-    bool hold_log_once = false;
-    // --- Perturbation CSV loading functions ---
-    std::vector<double> loadColumnFromCSV(const std::string& path, int colIndex, double tStart, double tEnd);
-    void loadPerturbationForces();
-
-    bool trialIsLeft = true;
-    // bool trialIsLeft = false;
 
 
     double F_const_up = 50.0;   // Set the constant perturbation force magnitude (N)
@@ -160,42 +151,11 @@ public:
 
 // public:
     // experiment config
-    // VM2 A{0.45, 0.002};
-    // VM2 C{0.45, 0.302};
-    // VM2 A{0.45, 0.002};
-    // VM2 C{0.45, 0.222};
-    // VM2 A{0.32, 0.002};
-    // VM2 C{0.32, 0.222};
     VM2 A{0.32, 0.050};
-    VM2 C{0.32, 0.300};
-
-
-    const int seed = 1111111;
-    // const int seed = 1456070;
-    // const int seed = 1661471;
 
     
-    // double epsA = 0.05;
-    // double epsC = 0.05;
-    double epsC = 0.08;  //default 0.05
-    
-    double lastTrpsT_ = -1.0;
-    double trpsMinInterval_ = 0.5; // 20Hz
-
     std::vector<VM2> trialEndPositions_;
-    // bool sendPosOnlyOnTimeout_ = false;    
     
-    // double k = 150;
-    // double d = 6;
-    double k = 300;
-    double d = 15;
-
-    double robotForceMagUp  = 17.5;
-    double robotForceMagLeft= 17.5;
-    
-    // double internalForceDur  = 1.2;
-    double trialMaxTime      = 0.5; // maximum trial time (s)
-    double  trialExtendTime = 0.2; // extra time after timeout to reach C
 
     const double x_min = 0.15;   // left boundary (m)
     const double x_max = 0.45;   // left boundary (m)
@@ -212,8 +172,6 @@ public:
     double rampUp       = 0.5;
     double rampDown     = 0.2;
 
-    double probLeft = 0.5;
-    int BlockID = 1;
 
     bool enablePIDToA = false;
     double KpToA = 5.0;
@@ -222,15 +180,8 @@ public:
     VM2    iErrToA = VM2::Zero();
     double iToA_max = 15.0;
 
-    // --- Meta parameters received from UI ---
-    int    meta_scoreMode   = 1;
-    int    meta_targetSucc  = 10;
-    int    meta_maxTrials   = 10;
-
-    // double V2_Smax = 110.0;
 
     // ToA related variables
-    // double holdTimeA  = 0.25;
     double holdTimeA  = 1;
     double epsA_hold  = 0.10;
     double inBandSince = 0.0;
@@ -248,26 +199,10 @@ public:
     void resetToAIntegrators();
     void writeCSV(double t, const VM2& pos, const VM2& vel, const VM2& fInternal, const VM2& fUser, double effort);
     void applyForce(const VM2& F);
-    bool startTrialSignal();
 
 
 private:
-    void handleInput();
     void openCSV();
-    // Deterministic schedule for LEFT/UP within a 10-trial block: -1=LEFT, +1=UP
-    std::vector<int> trialSchedule_;
-    std::vector<double> trialProb_; // 每个 trial 对应的概率值
-    double currentTrialProb_ = 0.0;   // 当前试次概率
-    int currentTrialDir_  = 0;     // 当前试次方向：-1=LEFT，+1=UP
-
-    bool randomizeOrBlock = true;
-
-    size_t trialIdx_ = 0;
-    void buildDeterministicSchedule();
-    void buildDeterministicSchedule_random();
-    void dumpScheduleCSV_(const std::vector<int>& dir, const std::vector<double>& prob);
-    std::vector<int> fullDir_;
-    std::vector<double> fullProb_;
 
     // MERGED: Re-introducing enum for internal state management
     enum Phase {
@@ -276,6 +211,8 @@ private:
         TRIAL
     };
     Phase currentPhase;
+
+    int txSeq_ = 0;
 
     // MERGED: Flags to simulate entryCode() for each phase
     bool initToA = true;
@@ -286,20 +223,9 @@ private:
     // MERGED: Variables from M2TrialState are now here
     double trialStartTime = 0.0;
     double effortIntegral = 0.0;
-
-    double rawEffortIntegral = 0.0;
-
-    double baselineImpulseN = 0.0;
     
     bool finishedFlag = false;
 
-    // Scoring-related state variables
-    enum ScoringMode { V1_COUNT_SUCCESS, V2_EFFORT_DISTANCE };
-    ScoringMode currentMode;
-    int successfulTrials = 0;
-    int totalTrialsV1 = 0;
-    double totalScoreV2 = 0.0;
-    int totalTrialsV2 = 0;
 
     // ToA notification flag
     bool atA_notified_ = false;
@@ -310,8 +236,6 @@ private:
     double strtMinInterval = 1.0;
     std::mt19937 rng;
     std::ofstream csv;
-    // --- Add to M2ProbMoveState (private) ---
-    int txSeq_ = 0;
 
     // --- Preload detection (WAIT_START) ---
     struct WaitSample {
@@ -320,21 +244,13 @@ private:
         VM2    vel;    // end-eff velocity
         VM2    force;  // sensed end-eff force
     };
-    std::deque<WaitSample> waitBuf_;           // rolling buffer of recent WAIT_START samples
-    double preloadThresholdN_ = 10.0;           // adjustable threshold (N), default 3N
-    // double preloadWindowSec_  = 0.200;         // window (s), default 200ms
-    double preloadWindowSec_  = 0.200; 
-    bool   preloadSatisfied_  = false;         // result for the upcoming trial
-    std::ofstream preloadWinCsv_;              // raw 200ms window dump
-    // std::ofstream trialTagsCsv_;               // per-trial tags (preload yes/no)
-    std::ofstream preloadCsv_;                 // merged preload window log
-    void openPreloadCSVs_();
-    void closePreloadCSVs_();
-    // void writePreloadWindow_(int trialIdxForMode, double tNow);
-    // void writeTrialTag_(int trialIdxForMode, int mode, bool flag, double tNow);
-    void writePreloadWindow_(int trialIdxForMode, double tNow, int mode, bool preloadFlag);
-    double computeFxMin_(double tNow);
 
+
+
+
+    void sendUI_(const std::string& msg);
+
+    // -------------------------------------------------------------
     static bool isPrintableAscii(const std::string& s) {
         for (unsigned char ch : s) {
             if (ch < 0x20 || ch > 0x7E) { 
@@ -354,7 +270,7 @@ private:
         return h.str();
     }
 
-    void sendUI_(const std::string& msg);
+
 
 };
 

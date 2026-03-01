@@ -18,6 +18,7 @@ static inline double system_time_sec() {
     using namespace std::chrono;
     return duration_cast<duration<double>>(system_clock::now().time_since_epoch()).count();
 }
+
 // Transition guard: calibration finished -> leave CalibState
 static bool endCalib(StateMachine& sm) {
     return (sm.state<M2CalibState>("CalibState"))->isCalibDone();

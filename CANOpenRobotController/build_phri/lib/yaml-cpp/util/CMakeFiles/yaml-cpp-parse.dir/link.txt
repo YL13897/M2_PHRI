@@ -1,0 +1,1 @@
+/usr/bin/c++  -Wall -Wno-int-in-bool-context -g -O0 "CMakeFiles/yaml-cpp-parse.dir/parse.cpp.o" -o parse  ../libyaml-cppd.a 
