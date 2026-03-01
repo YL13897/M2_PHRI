@@ -102,19 +102,19 @@ void M2Machine::end() {
 }
 
 
-// 成员或静态局部
+// UI connection management and state update loop. Called in main loop at 100Hz, but only sends state to UI at 40Hz to reduce network load.
 static bool connected = false;
 static auto lastCheck = std::chrono::steady_clock::now();
 
 void M2Machine::hwStateUpdate() {
     auto now = std::chrono::steady_clock::now();
 
-    // 每 1s 检查一次
+    // Check UI connection every second, and block until reconnected if lost
     if (UIserver && std::chrono::duration<double,std::milli>(now - lastCheck).count() > 1000.0) {
         connected = UIserver->isConnected();
         if (!connected) {
             spdlog::critical("UI down, waiting reconnect...");
-            UIserver->reconnect();       // 阻塞等待新客户端
+            UIserver->reconnect();       // This will block until reconnected, and then return true
             connected = UIserver->isConnected();
             spdlog::info("UI reconnected");
         }
@@ -123,7 +123,7 @@ void M2Machine::hwStateUpdate() {
 
     StateMachine::hwStateUpdate();
 
-    // 仅在已连接时发状态
+    // Send state to UI at 40Hz to reduce network load (but still have smooth updates in Unity)
     static auto lastSend = std::chrono::steady_clock::now();
     if (connected && std::chrono::duration<double,std::milli>(now - lastSend).count() >= 25.0) {
         UIserver->sendState();
