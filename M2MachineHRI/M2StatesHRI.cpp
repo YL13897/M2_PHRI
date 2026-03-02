@@ -1,6 +1,10 @@
-// Core state implementations for M2 machine
-// - Calibration, Standby, Probabilistic Move (TO_A / WAIT_START / TRIAL)
-// - UI command handling and CSV logging
+/* 
+    M2StatesHRI.h and M2MachineHRI.cpp:
+        Core state implementations for M2 machine
+        - Calibration, Standby, Probabilistic Move (TO_A / WAIT_START / TRIAL)
+        - UI command handling and CSV logging
+*/
+
 #include <chrono>
 #include <spdlog/spdlog.h>
 #include "M2StatesHRI.h"
@@ -48,11 +52,7 @@ static inline double MinJerk(const VM2& X0, const VM2& Xf, double T, double t,
     return s;
 }
 
-double timeval_to_sec(struct timespec *ts)
-{
-    return (double)(ts->tv_sec + ts->tv_nsec / 1000000000.0);
-}
-
+// Simple clamp helper
 template <typename T>
 static inline T clamp_compat(T v, T lo, T hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
@@ -60,6 +60,8 @@ static inline T clamp_compat(T v, T lo, T hi) {
 
 
 // ----------------------------------------------------------------------------
+// --- M2CalibState implementation ---
+
 // Begin calibration: enter torque mode and start stop-seek routine
 void M2CalibState::entryCode() {
     calibDone=false;
@@ -72,6 +74,7 @@ void M2CalibState::entryCode() {
     robot->printJointStatus();
     std::cout << "Calibrating (keep clear)..." << std::flush;
 }
+
 // Drive joints toward stops; apply calibration once conditions met
 void M2CalibState::duringCode() {
     VM2 tau(0, 0);
@@ -103,6 +106,7 @@ void M2CalibState::duringCode() {
         }
     }
 }
+
 // Leave with zero force command and compensation active
 void M2CalibState::exitCode() {
     robot->setEndEffForceWithCompensation(VM2::Zero());
@@ -110,16 +114,16 @@ void M2CalibState::exitCode() {
 
 
 // ----------------------------------------------------------------------------
-// Enter standby: torque control + open CSV
+// --- M2StandbyState implementation ---
+
+// Enter standby: torque control mode with zero commanded force
 void M2StandbyState::entryCode() {
     robot->initTorqueControl();
-    openStandbyCSV_();
-    standbyIter_ = 0;
 }
 
-// Idle loop: apply zero force (with compensation), snapshot data, and log sparsely
+// Idle loop: zero commanded force, snapshot kinematics, and periodic status print
 void M2StandbyState::duringCode() {
-    // Commanded force in Standby is zero (pure transparent/compensated mode)
+    // Commanded force in Standby is zero
     VM2 F_cmd = VM2::Zero();
 
     // Apply the commanded force
@@ -131,71 +135,17 @@ void M2StandbyState::duringCode() {
     VM2 Fs = robot->getEndEffForce();
 
     // Periodic status print
-    if (iterations()%500==1) 
-        robot->printStatus();
-
-    // Lightweight logging every N iterations
-    if (standbyRecording_ && (++standbyIter_ % standbyLogEveryN_ == 0)) {
-        const double sys_t = system_time_sec();
-        const std::string sid = (machine ? machine->sessionId : std::string("UNSET"));
-        writeStandbyCSV_(running(), sys_t, sid, X, dX, F_cmd, Fs);
-    }
+    if (iterations()%500==1) robot->printStatus();
 }
+
 // Exit standby: zero force and close CSV
 void M2StandbyState::exitCode() {
     robot->setEndEffForceWithCompensation(VM2::Zero());
-    // closeStandbyCSV_();
 }
-
-// Open logs/Standby_<session>.csv (append, create header on first open)
-void M2StandbyState::openStandbyCSV_() {
-    // Append mode to keep a continuous session log
-    // standbyCsv_.open("logs/StandbyLog.csv", std::ios::out | std::ios::app);
-    const std::string sid = (machine && !machine->sessionId.empty()) ? machine->sessionId : std::string("UNSET");
-
-    const std::string fname = std::string("logs/Standby_") + sid + ".csv";
-
-    standbyCsv_.open(fname, std::ios::out | std::ios::app);
-    if (!standbyCsv_.is_open()) {
-        spdlog::error("Failed to open Standby CSV: {}", fname);
-        return;
-    }
-    if (standbyCsv_.tellp() == 0) {
-        standbyCsv_ << "time,sys_time,session_id,pos_x,pos_y,vel_x,vel_y,fcmd_x,fcmd_y,fs_x,fs_y\n";
-    }
-}
-
-// Close standby CSV if open
-void M2StandbyState::closeStandbyCSV_() {
-    if (standbyCsv_.is_open()) standbyCsv_.close();
-}
-
-// Append one row to standby CSV
-void M2StandbyState::writeStandbyCSV_(double t, double sys_t, const std::string& sid,
-                                      const VM2& pos, const VM2& vel, const VM2& fcmd, const VM2& fsense) {
-    if (!standbyCsv_.is_open()) return;
-    standbyCsv_ << std::fixed << std::setprecision(6)
-                << t << "," << sys_t << "," << sid << ","
-                << pos(0) << "," << pos(1) << ","
-                << vel(0) << "," << vel(1) << ","
-                << fcmd(0) << "," << fcmd(1) << ","
-                << fsense(0) << "," << fsense(1) << "\n";
-}
-
-
 
 
 // ----------------------------------------------------------------------------
-
-// Send a plain-text/structured line back to UI
-void M2ProbMoveState::sendUI_(const std::string& msg) {
-    const int seq = ++this->txSeq_;
-    const size_t L = msg.size();
-
-    if (machine && machine->UIserver) {
-        machine->UIserver->sendCmd(msg);
-    } 
-}
+// --- M2ProbMoveState implementation ---
 
 // Construct probabilistic move state; machine is used for UI/session utilities
 M2ProbMoveState::M2ProbMoveState(RobotM2* M2, M2MachineHRI* mach, const char* name)
@@ -206,8 +156,7 @@ void M2ProbMoveState::entryCode() {
 
     robot->initTorqueControl();
     robot->setEndEffForceWithCompensation(VM2::Zero(), false);
-    // rng.seed(std::random_device{}());
-    
+    trialEndPositions_.clear();
     currentPhase = TO_A;
     finishedFlag = false;
     initToA = true;
@@ -215,12 +164,14 @@ void M2ProbMoveState::entryCode() {
     pendingStart  = false;
     softWallEnabled = false;  
     atA_notified_ = false;
+    openCSV();
+
 }
 
 // Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL / ...)
 void M2ProbMoveState::duringCode() {
 
-    // === GLOBAL COMMAND DRAIN === (RSTA/HALT/STRT/param set/etc.)
+    // === GLOBAL COMMAND DRAIN === (STRT/)
     
     {
         int guard = 256; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 256 commands.
@@ -325,7 +276,6 @@ void M2ProbMoveState::duringCode() {
             if (initToA) {
                 // Simulate entryCode() for TO_A
                 resetToAPlan(robot->getEndEffPosition());
-                resetToAIntegrators();
                 initToA = false;
             }
 
@@ -338,19 +288,6 @@ void M2ProbMoveState::duringCode() {
 
             double k_pos = 4.0;
             F_cmd = impedance(Xd, X, dX, dXd) + k_pos * (Xd - X);
-
-            if (enablePIDToA) {
-                VM2 e = (Xd - X);
-                VM2 de = (dXd - dX);
-                iErrToA += e * dt();
-                for (int i = 0; i < 2; i++) {
-                    double lim = (iToA_max > 1e-9 ? (iToA_max / std::max(1e-9, KiToA)) : 0.0);
-                    iErrToA(i) = clamp_compat(iErrToA(i), -lim, +lim);
-                }
-                VM2 F_pid = KpToA * e + KiToA * iErrToA + KdToA * de;
-                F_cmd += F_pid;
-            }
-
             applyForce(F_cmd);
 
             // Transition condition check
@@ -393,12 +330,13 @@ void M2ProbMoveState::exitCode() {
     robot->setEndEffForceWithCompensation(VM2::Zero());
     if (csv.is_open()) csv.close();
 
+    // Send session summary message to UI
     if (machine && machine->UIserver) {
-        std::ostringstream oss;
-        oss.setf(std::ios::fixed);
+        std::ostringstream oss; // session summary can be expanded with more metadata as needed
+        oss.setf(std::ios::fixed); // fixed-point for consistent formatting
         oss.precision(3);
         std::string out = oss.str();
-        sendUI_(out);
+        sendUI_(out); // Placeholder for session summary command; can be expanded with actual summary data
         {
             machine->UIserver->sendCmd("SESS");
             spdlog::info("Log:SESS");
@@ -406,7 +344,20 @@ void M2ProbMoveState::exitCode() {
     }
 }
 
-// ... impedance, readUserForce, etc. methods remain the same ...
+
+// -----------------------------------------------------------------------------
+// --- M2ProbMoveState helper methods ---
+
+// Send a plain-text/structured line back to UI
+void M2ProbMoveState::sendUI_(const std::string& msg) {
+    const int seq = ++this->txSeq_; // increment sequence for debugging
+    const size_t L = msg.size();
+    if (machine && machine->UIserver) {
+        machine->UIserver->sendCmd(msg);
+    } 
+}
+
+// Compute impedance control force based on current state and optional desired acceleration
 VM2 M2ProbMoveState::impedance(const VM2& X0, const VM2& X, const VM2& dX, const VM2& dXd) {
     Eigen::Matrix2d K = Eigen::Matrix2d::Identity() * k;
     Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * d;
@@ -414,6 +365,7 @@ VM2 M2ProbMoveState::impedance(const VM2& X0, const VM2& X, const VM2& dX, const
     return K * (X0 - X) - D * dX;
 }
 
+// Read user force from joystick axes, scaled by userForceScale
 VM2 M2ProbMoveState::readUserForce() {
     VM2 f = VM2::Zero();
     if (robot->joystick) {
@@ -429,18 +381,14 @@ VM2 M2ProbMoveState::readUserForce() {
     return f;
 }
 
-
+// Reset TO_A trajectory plan with current position as new start, used when entering TO_A
 void M2ProbMoveState::resetToAPlan(const VM2& Xnow) {
     Xi = Xnow;
     t0_toA = running();
     inBandSince = 0.0;
 }
 
-void M2ProbMoveState::resetToAIntegrators() {
-    iErrToA.setZero();
-}
-
-
+// Apply force command with optional soft wall constraints
 void M2ProbMoveState::applyForce(const VM2& F) {
 
     // const double x_min = 0.15;   // left boundary (m)
@@ -486,3 +434,36 @@ void M2ProbMoveState::applyForce(const VM2& F) {
     robot->setEndEffForceWithCompensation(F_cmd, true);
 }
 
+
+// -----------------------------------------------------------------------------
+// --- CSV logging helpers for ProbMoveState ---
+
+// Open logs/M2ProbMove_<session>.csv with header
+void M2ProbMoveState::openCSV() {
+
+    const std::string sid = (machine && !machine->sessionId.empty()) ? machine->sessionId : std::string("UNSET");
+    const std::string fname = std::string("logs/M2ProbMove_") + sid + ".csv";
+    csv.open(fname, std::ios::out | std::ios::app);
+    if (!csv.is_open()) {
+        spdlog::error("Failed to open ProbMove CSV: {}", fname);
+        return;
+    }
+    if (csv.tellp() == 0) {
+        csv << "time,sys_time,session_id,pos_x,pos_y,vel_x,vel_y,internal_fx,internal_fy,user_fx,user_fy,effort\n";
+    }
+}
+
+// Write a row to the ProbMove CSV with current trial data and metadata
+void M2ProbMoveState::writeCSV(double t, const VM2& pos, const VM2& vel,
+    const VM2& fInternal, const VM2& fUser, double effort) {
+    if (!csv.is_open()) return;
+    const double sys_t = system_time_sec();
+    const std::string sid = (machine ? machine->sessionId : std::string("UNSET"));
+    csv << std::fixed << std::setprecision(6)
+        << t << "," << sys_t << "," << sid << ","
+        << pos(0) << "," << pos(1) << ","
+        << vel(0) << "," << vel(1) << ","
+        << fInternal(0) << "," << fInternal(1) << ","
+        << fUser(0) << "," << fUser(1) << ","
+        << effort << "\n";
+}

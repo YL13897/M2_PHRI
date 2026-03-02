@@ -1,6 +1,17 @@
-
-#ifndef M2_ROBOT_H
-#define M2_ROBOT_H
+/*
+ * =====================================================================================
+ *
+ *      Project:   M2 Human–Robot Interaction Experiment Framework
+ *      Module:    M2MachineHRI / M2StatesHRI
+ *      Purpose:   State machine implementation for M2 robot control, trial logic,
+ *                 effort computation, deterministic perturbation scheduling, and
+ *                 Unity interface synchronization.
+ *
+ * =====================================================================================
+ */
+ 
+#ifndef M2_MACHINE_H
+#define M2_MACHINE_H
 
 #include "RobotM2.h"
 #include "StateMachine.h"
@@ -32,4 +43,4 @@ public:
     std::string sessionId = "UNSET";
 };
 
-#endif /* M2_ROBOT_H */
+#endif /* M2_MACHINE_H */

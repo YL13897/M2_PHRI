@@ -1,17 +1,14 @@
 /*
- * =====================================================================================
- *
- *      Project:   M2 Human–Robot Interaction Experiment Framework
- *      Module:    M2Machine / M2States
- *      Purpose:   State machine implementation for M2 robot control, trial logic,
- *                 effort computation, deterministic perturbation scheduling, and
- *                 Unity interface synchronization.
- *
- * =====================================================================================
- */
+    M2MachineHRI.cpp: 
+    Top-level state machine implementation for M2 robot control, trial logic, 
+    effort computation, deterministic perturbation scheduling, 
+    and Unity interface synchronization.
+*/
 
- 
-#include "M2MachineHRI.h"
+ #include "M2MachineHRI.h"
+
+// ----------------------------------------------------------------------------
+// --- Transition guards implementations ---
 
 // Wall-clock time helper (seconds since epoch) for logs
 static inline double system_time_sec() {
@@ -53,8 +50,9 @@ static bool probMoveFinished(StateMachine& sm){
     return sm.state<M2ProbMoveState>("ProbMoveState")->isFinished();
 }
 
-// Core state implementations for M2 machine
-// - Calibration, Standby, Probabilistic Move (TO_A / WAIT_START / TRIAL)
+// -----------------------------------------------------------------------------
+// --- State method implementations ---
+// Core state implementations for M2 machine: Calibration, Standby, Probabilistic Move (TO_A / WAIT_START / TRIAL)
 M2MachineHRI::M2MachineHRI() {
 
     // Create and own the robot instance
@@ -108,6 +106,10 @@ void M2MachineHRI::end() {
         UIserver->closeConnection();
     StateMachine::end();
 }
+
+
+// -----------------------------------------------------------------------------
+// --- M2MachineHRI main update loop ---
 
 // UI connection management and state update loop. Called in main loop at 100Hz, but only sends state to UI at 40Hz to reduce network load.
 // 100Hz: default setting, see: CANOpenRobotController/src/core/application.cpp -> app_programControlLoop()
