@@ -430,3 +430,59 @@ VM2 M2ProbMoveState::readUserForce() {
 }
 
 
+void M2ProbMoveState::resetToAPlan(const VM2& Xnow) {
+    Xi = Xnow;
+    t0_toA = running();
+    inBandSince = 0.0;
+}
+
+void M2ProbMoveState::resetToAIntegrators() {
+    iErrToA.setZero();
+}
+
+
+void M2ProbMoveState::applyForce(const VM2& F) {
+
+    // const double x_min = 0.10;   // left boundary (m)
+    // const double x_max = 0.55;   // left boundary (m)
+    // const double k_wall = 1800.0; // wall stiffness N/m
+    // const double d_wall = 50.0;  // wall damping N·s/m
+    // const double y_max = 0.35;   // upper boundary (m)
+
+    VM2 F_cmd = F;
+
+    if (softWallEnabled) {
+        //  read current position and velocity
+        VM2 X  = robot->getEndEffPosition();
+        VM2 dX = robot->getEndEffVelocity();
+
+
+        // left wall
+        if (X(0) < x_min) {
+            double pen = x_min - X(0);
+            double F_wall = k_wall * pen - d_wall * dX(0);
+            if (F_wall > 0.0) F_cmd(0) += F_wall;
+        }
+        // right wall
+        if (X(0) > x_max) {
+            double pen = X(0) - x_max;
+            double F_wall = k_wall * pen + d_wall * dX(0);
+            if (F_wall > 0.0) F_cmd(0) -= F_wall;
+        }
+
+        // upper wall
+        if (X(1) > y_max) {
+        double penY = X(1) - y_max;   // penetration depth (upper wall)
+            double F_wall_y = k_wall * penY + d_wall * dX(1);  
+            // Only apply when pushing into the wall
+            if (F_wall_y > 0.0) F_cmd(1) -= F_wall_y;   // push downward
+        }
+    }
+
+    // Clamp forces
+    for (int i=0; i<2; ++i)
+        F_cmd(i) = clamp_compat(F_cmd(i), -forceSaturation, forceSaturation);
+
+    robot->setEndEffForceWithCompensation(F_cmd, true);
+}
+
