@@ -1,1 +1,0 @@
-/usr/bin/c++  -Wall -Wno-int-in-bool-context -g -O0 "CMakeFiles/yaml-cpp-sandbox.dir/sandbox.cpp.o" -o sandbox  ../libyaml-cppd.a 

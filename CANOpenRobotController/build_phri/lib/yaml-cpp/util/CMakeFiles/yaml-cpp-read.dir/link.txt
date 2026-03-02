@@ -1,1 +1,0 @@
-/usr/bin/c++  -Wall -Wno-int-in-bool-context -g -O0 "CMakeFiles/yaml-cpp-read.dir/read.cpp.o" -o read  ../libyaml-cppd.a 
