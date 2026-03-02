@@ -25,22 +25,23 @@ static bool endCalib(StateMachine& sm) {
 }
 
 // Transition guard: Standby -> ProbMove when UI sends BGIN
-static bool toProbOnBtn12(StateMachine& SM){
+static bool toProbOnBtn(StateMachine& SM){
     auto& sm = static_cast<M2MachineHRI&>(SM);
 
     if (sm.UIserver && sm.UIserver->isCmd()) {
         std::string cmd; std::vector<double> v;
         sm.UIserver->getCmd(cmd, v);
 
-        // MODIFIED: "STRT_PROB" -> "BGIN"
+        // If "BGIN" command received, clear it and transition to ProbMove
         if (cmd == "BGIN") {
             sm.UIserver->clearCmd();
             sm.UIserver->sendCmd(std::string("OK"));
             spdlog::info("[TRANS] accepting BGIN -> toProb");
             return true;
         }
-
+        // If unknown command received, clear it and log a warning
         else {
+            spdlog::warn("Unexpected cmd='{}' received. Ignoring.", cmd);
             sm.UIserver->clearCmd();
         }
     }
@@ -52,26 +53,31 @@ static bool probMoveFinished(StateMachine& sm){
     return sm.state<M2ProbMoveState>("ProbMoveState")->isFinished();
 }
 
+// Core state implementations for M2 machine
+// - Calibration, Standby, Probabilistic Move (TO_A / WAIT_START / TRIAL)
 M2MachineHRI::M2MachineHRI() {
-    setRobot(std::make_unique<RobotM2>("M2_MELB"));
 
+    // Create and own the robot instance
+    setRobot(std::make_unique<RobotM2>("M2_MELB")); 
     // Register states
     addState("CalibState",   std::make_shared<M2CalibState>(robot()));
     addState("StandbyState", std::make_shared<M2StandbyState>(robot(),this));
-    // The constructor call remains the same
     addState("ProbMoveState",std::make_shared<M2ProbMoveState>(robot(),this));
 
     // Wire transitions
     addTransition("CalibState", &endCalib,"StandbyState");
-    // MODIFIED: Transition name is updated for clarity
     addTransition("ProbMoveState", &probMoveFinished, "StandbyState");
-    addTransition("StandbyState", &toProbOnBtn12, "ProbMoveState");
+    addTransition("StandbyState", &toProbOnBtn, "ProbMoveState");
 
-    setInitState("CalibState");
+    // Set initial state to calibration
+    setInitState("CalibState"); 
 }
+
+// Destructor
 M2MachineHRI::~M2MachineHRI() {
 }
 
+// Initialize robot, logging, and UI server
 void M2MachineHRI::init() {
     spdlog::debug("M2Machine::init()");
     if (robot()->initialise()) {
@@ -96,17 +102,18 @@ void M2MachineHRI::init() {
     }
 }
 
+// Tear down UI and state machine
 void M2MachineHRI::end() {
     if (running() && UIserver) 
         UIserver->closeConnection();
     StateMachine::end();
 }
 
-
 // UI connection management and state update loop. Called in main loop at 100Hz, but only sends state to UI at 40Hz to reduce network load.
+// 100Hz: default setting, see: CANOpenRobotController/src/core/application.cpp -> app_programControlLoop()
 static bool connected = false;
 static auto lastCheck = std::chrono::steady_clock::now();
-
+// This is the main update loop for the state machine, called at 100Hz. It handles UI command draining, phase control, and state-specific logic.
 void M2MachineHRI::hwStateUpdate() {
     auto now = std::chrono::steady_clock::now();
 
@@ -121,12 +128,12 @@ void M2MachineHRI::hwStateUpdate() {
         }
         lastCheck = now;
     }
-
-    StateMachine::hwStateUpdate();
+    // Run the current state's duringCode() and handle transitions
+    StateMachine::hwStateUpdate(); 
 
     // Send state to UI at 40Hz to reduce network load (but still have smooth updates in Unity)
     static auto lastSend = std::chrono::steady_clock::now();
-    if (connected && std::chrono::duration<double,std::milli>(now - lastSend).count() >= 25.0) {
+    if (connected && std::chrono::duration<double,std::milli>(now - lastSend).count() >= 25.0) { // 25ms = 40Hz
         UIserver->sendState();
         lastSend = now;
     }

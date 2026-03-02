@@ -443,11 +443,11 @@ void M2ProbMoveState::resetToAIntegrators() {
 
 void M2ProbMoveState::applyForce(const VM2& F) {
 
-    // const double x_min = 0.10;   // left boundary (m)
-    // const double x_max = 0.55;   // left boundary (m)
-    // const double k_wall = 1800.0; // wall stiffness N/m
-    // const double d_wall = 50.0;  // wall damping N·s/m
-    // const double y_max = 0.35;   // upper boundary (m)
+    // const double x_min = 0.15;   // left boundary (m)
+    // const double x_max = 0.45;   // left boundary (m)
+    // const double k_wall = 800.0; // wall stiffness N/m
+    // const double d_wall = 40.0;  // wall damping N·s/m
+    // const double y_max = 0.40;   // upper boundary (m)
 
     VM2 F_cmd = F;
 
