@@ -165,6 +165,20 @@ class M2ProbMoveState : public M2TimedState {
         bool atA_notified_ = false;
         bool finishedFlag = false;
         
+        // Commands part: Mode setting
+        enum HRIMode { V1_HRI, V2_PHRI };
+        HRIMode HRIMode_ = V2_PHRI;
+        enum CtrlMode { V1_POS, V2_VEL };
+        CtrlMode CtrlMode_ = V2_VEL;
+
+
+
+        // TRIAL part: scoring and trial end detection
+        double trialStartTime = 0.0;
+        double effortIntegral = 0.0;
+        double rawEffortIntegral = 0.0;
+
+
         // --- UI command debounce ---
         // STRT debounce (seconds)
         double lastStrtTime = -1.0; // last accepted STRT command time for debounce

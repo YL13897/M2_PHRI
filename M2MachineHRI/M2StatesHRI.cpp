@@ -172,14 +172,13 @@ void M2ProbMoveState::entryCode() {
 void M2ProbMoveState::duringCode() {
 
     // === GLOBAL COMMAND DRAIN === (STRT/)
-    
     {
-        int guard = 256; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 256 commands.
+        int guard = 1024; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 1024 commands.
         while (guard-- > 0 && machine && machine->UIserver && machine->UIserver->isCmd()) {
             std::string c; std::vector<double> a;
             machine->UIserver->getCmd(c, a);
             
-
+            // Simple command parsing with trimming and case normalization
             auto trim = [](std::string s){
                 auto notspace = [](int ch){ return !std::isspace(ch); };
                 s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
@@ -189,7 +188,7 @@ void M2ProbMoveState::duringCode() {
             std::string cu = trim(c);
             std::transform(cu.begin(), cu.end(), cu.begin(), [](unsigned char ch){ return std::toupper(ch); });
 
-            
+            // Handle STRT command with debounce and pending flag
             if (cu.rfind("STRT", 0) == 0) {
                 double now = running();
                 if (pendingStart) {
@@ -205,9 +204,36 @@ void M2ProbMoveState::duringCode() {
                 pendingStart = true;
                 lastStrtTime = now;
                 machine->UIserver->clearCmd();
-                spdlog::info("GLOBAL: STRT captured (pendingStart=1, t={:.3f})", now);
+                spdlog::info("GLOBAL: STRT captured (pendingStart=true, t={:.3f})", now);
                 break; 
             } 
+            
+            // Handle mode setting commands (S_MD, S_CT) only if betweenTrials is true
+            if (cu.rfind("S_MD",0)==0 || cu.rfind("S_CT",0)==0) {
+                if (betweenTrials) {
+                    if (cu.rfind("S_MD",0)==0 && !a.empty()) {
+                        HRI_Mode = (int)std::round(a[0]);
+                        HRIMode_ = (HRI_Mode == 2) ? V2_PHRI : V1_HRI;
+                        spdlog::info("BETWEEN-TRIALS: S_MD -> mode={}", HRI_Mode);
+                        if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
+
+                    } else if (cu.rfind("S_CT",0)==0 && !a.empty()) {
+                        Ctrl_Mode = (int)std::round(a[0]);
+                        CtrlMode_ = (Ctrl_Mode == 2) ? V2_VEL : V1_POS;
+                        spdlog::info("BETWEEN-TRIALS: S_CT -> mode={}", Ctrl_Mode);
+                        if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
+
+                    } else {
+                        if (machine && machine->UIserver) machine->UIserver->sendCmd("ERR ARG");
+                    }
+                } else {
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
+                    spdlog::warn("PARAM LOCKED: '{}' rejected (phase={}, betweenTrials=0)", cu, (int)currentPhase);
+                }
+                machine->UIserver->clearCmd();
+                continue;
+            }
+
 
             // If unknown command
             spdlog::warn("GLOBAL: unknown cmd='{}' (trim='{}') @phase={}", c, cu, (int)currentPhase);
@@ -219,58 +245,8 @@ void M2ProbMoveState::duringCode() {
     // === END GLOBAL COMMAND DRAIN ===
     // Phase controller: TO_A -> WAIT_START -> TRIAL
     switch (currentPhase) {
-
-        // In M2States.cpp, inside M2ProbMoveState::duringCode()
-        case WAIT_START: {
-            // Keep recent samples for preload window analysis until STRT is consumed
-            // Sample and maintain rolling buffer
-            {
-                WaitSample s;
-                s.t     = running();
-                s.pos   = robot->getEndEffPosition();
-                s.vel   = robot->getEndEffVelocity();
-                s.force = robot->getEndEffForce();
-            }
-
-            VM2 X = robot->getEndEffPosition();
-            double distToA = (A - X).norm();
-            bool atA_hold = false;           
-            if (distToA < epsA_hold) {
-                if (inBandSince == 0.0) inBandSince = running();
-                else if ((running() - inBandSince) >= holdTimeA) {
-                    atA_hold = true;
-                    if (machine && machine->UIserver && !atA_notified_) {
-                        machine->UIserver->sendCmd("AT_A");  // Send p[0] = currentTrialProb_
-                        atA_notified_ = true;
-                        spdlog::info("WAIT_START: Checked, atA_hold!");
-                    } 
-                }
-            } else {
-                inBandSince = 0.0;
-                atA_notified_ = false;
-            }
-
-            if (pendingStart && atA_hold) {
-                // On STRT: evaluate last preload window and log
-
-                const double tNow = running();
-
-                pendingStart  = false;
-                betweenTrials = false;  
-                currentPhase  = TRIAL;
-                initTrial     = true;
-                
-                if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                spdlog::info("WAIT_START: pendingStart consumed -> TRIAL (atA_hold=1)");
-                break; 
-            } else if (pendingStart && !atA_hold) {
-                if (iterations() % 1000 == 1) {
-                    spdlog::info("WAIT_START: STRT pending but not at A (dist={:.3f} <? {:.3f})", distToA, epsA_hold);
-                }
-            }
-
-        }
-
+        
+        // --- TO_A: move/hold near A ---
         case TO_A: {
             // This block simulates M2ToAState (move/hold near A)
             if (initToA) {
@@ -301,7 +277,7 @@ void M2ProbMoveState::duringCode() {
                     if (machine && machine->UIserver && !atA_notified_) {         
                         machine->UIserver->sendCmd("AT_A"); 
                         atA_notified_ = true;
-                        spdlog::info("Checked, atA_hold! ");
+                        spdlog::info("Checked, atA_hold!");
                     }     
                 }
             } else {
@@ -311,14 +287,124 @@ void M2ProbMoveState::duringCode() {
 
             if (atA_hold) {
                 softWallEnabled = true;
+                betweenTrials = true;
                 currentPhase = WAIT_START;
-                betweenTrials = true;       
                 spdlog::info("TO_A -> WAIT_START (betweenTrials=1)");
             }
             break;
         }
 
+        // --- WAIT_START: transition to TRIAL ---
+        case WAIT_START: {
+            // This block simulates WAIT_START: 
+            // {
+            //     WaitSample s;
+            //     s.t     = running();
+            //     s.pos   = robot->getEndEffPosition();
+            //     s.vel   = robot->getEndEffVelocity();
+            //     s.force = robot->getEndEffForce();
+            // }
+
+            VM2 X = robot->getEndEffPosition();
+            double distToA = (A - X).norm();
+            bool atA_hold = false;           
+            if (distToA < epsA_hold) {
+                if (inBandSince == 0.0) inBandSince = running();
+                else if ((running() - inBandSince) >= holdTimeA) {
+                    atA_hold = true;
+                    if (machine && machine->UIserver && !atA_notified_) {
+                        machine->UIserver->sendCmd("AT_A");  // Send p[0] = currentTrialProb_
+                        atA_notified_ = true;
+                        spdlog::info("WAIT_START: Checked, atA_hold!");
+                    }
+                }
+            } else {
+                inBandSince = 0.0;
+                atA_notified_ = false;
+            }
+
+            if (pendingStart && atA_hold) {
+                // On STRT: evaluate last preload window and log
+
+                const double tNow = running();
+
+                pendingStart  = false;
+                betweenTrials = false;
+                initTrial     = true;
+                currentPhase  = TRIAL;
+
+                if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
+                spdlog::info("WAIT_START: pendingStart consumed -> TRIAL (atA_hold=1)");
+                break; 
+
+            } else if (pendingStart && !atA_hold) {
+                if (iterations() % 1000 == 1) {
+                    spdlog::info("WAIT_START: STRT pending but not at A (dist={:.3f} <? {:.3f})", distToA, epsA_hold);
+                }
+            }
+
+        }
+        
+        
         case TRIAL: {
+
+            if (initTrial) {
+                // Simulate entryCode() for TRIAL
+                trialStartTime = running();
+                effortIntegral = 0.0;
+                rawEffortIntegral = 0.0;
+
+                if (machine && machine->UIserver) {
+                    // std::ostringstream oss;
+                    // oss.setf(std::ios::fixed);
+                    // oss.precision(3);
+
+                    // oss << "TRIAL_BEGIN t=" << trialStartTime
+                    //     << " HRI_Mode=" << (HRIMode_ == V2_PHRI ? 2 : 1)
+                    //     << " Ctrl_Mode=" << (CtrlMode_ == V2_VEL ? 2 : 1)
+
+                    // std::string outBegin = oss.str();
+                    // sendUI_(outBegin);
+
+                    {
+                        std::vector<double> p; 
+                        p.push_back(trialStartTime);                      // t
+                        p.push_back((HRIMode_ == V2_PHRI) ? 2 : 1);       // HRI_Mode
+                        p.push_back((CtrlMode_ == V2_VEL) ? 2 : 1);       // Ctrl_Mode
+                        machine->UIserver->sendCmd("TRBG", p);  // TRial BeGin with params
+                        spdlog::info("Log: TRBG");
+                    }
+                }
+                initTrial = false;
+            }
+
+            VM2 X = robot->getEndEffPosition();
+            VM2 dX = robot->getEndEffVelocity();
+            double tTrial = running() - trialStartTime;
+
+
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         }
 
