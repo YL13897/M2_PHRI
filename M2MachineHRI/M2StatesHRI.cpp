@@ -125,15 +125,7 @@ void M2StandbyState::entryCode() {
 // Idle loop: zero commanded force, snapshot kinematics, and periodic status print
 void M2StandbyState::duringCode() {
     // Commanded force in Standby is zero
-    VM2 F_cmd = VM2::Zero();
-
-    // Apply the commanded force
-    robot->setEndEffForceWithCompensation(F_cmd, true);
-
-    // Snapshot kinematics
-    VM2 X  = robot->getEndEffPosition();
-    VM2 dX = robot->getEndEffVelocity();
-    VM2 Fs = robot->getEndEffForce();
+    robot->setEndEffForceWithCompensation(VM2::Zero(), true);
 
     // Periodic status print
     if (iterations()%500==1) robot->printStatus();
@@ -347,7 +339,7 @@ void M2ProbMoveState::duringCode() {
             if (pendingStart && atA_hold) {
                 // On STRT: evaluate last preload window and log
 
-                const double tNow = running();
+                // const double tNow = running();
 
                 pendingStart  = false;
                 betweenTrials = false;
@@ -409,10 +401,24 @@ void M2ProbMoveState::duringCode() {
             VM2 F_internal = VM2::Zero();
             VM2 F_unity = unityForceCmd_;
 
-            // Keep framework for other combinations but only implement V2_PHRI + V1_POS for now.
+            // Four-mode framework:
+            // 1) V2_PHRI + V1_POS: implemented (X sync + force, Y locked)
             if (HRIMode_ == V2_PHRI && CtrlMode_ == V1_POS) {
-                // One-DOF sync mode: accept Unity feedback on X only; Y is locked on M2 side.
                 F_unity(1) = 0.0;
+            }
+            // 2) V2_PHRI + V2_VEL: implemented (X velocity sync + force, Y locked)
+            else if (HRIMode_ == V2_PHRI && CtrlMode_ == V2_VEL) {
+                F_unity(1) = 0.0;
+            }
+            // 3) V1_HRI + V1_POS: framework reserved (to be implemented)
+            else if (HRIMode_ == V1_HRI && CtrlMode_ == V1_POS) {
+                // No force feedback in HRI mode.
+                F_unity.setZero();
+            }
+            // 4) V1_HRI + V2_VEL: framework reserved (to be implemented)
+            else if (HRIMode_ == V1_HRI && CtrlMode_ == V2_VEL) {
+                // No force feedback in HRI mode.
+                F_unity.setZero();
             }
 
             VM2 F_cmd = F_internal + F_unity;
@@ -463,8 +469,8 @@ void M2ProbMoveState::exitCode() {
 
 // Send a plain-text/structured line back to UI
 void M2ProbMoveState::sendUI_(const std::string& msg) {
-    const int seq = ++this->txSeq_; // increment sequence for debugging
-    const size_t L = msg.size();
+    if (msg.empty()) return;
+    ++this->txSeq_;
     if (machine && machine->UIserver) {
         machine->UIserver->sendCmd(msg);
     } 

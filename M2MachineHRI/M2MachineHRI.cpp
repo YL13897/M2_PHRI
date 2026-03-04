@@ -5,7 +5,9 @@
     and Unity interface synchronization.
 */
 
- #include "M2MachineHRI.h"
+
+#include "M2MachineHRI.h"
+
 
 // ----------------------------------------------------------------------------
 // --- Transition guards implementations ---
