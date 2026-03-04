@@ -11,6 +11,7 @@
 #include "M2MachineHRI.h"
 #include <cmath>
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <sstream>
 #include <random>
@@ -164,6 +165,10 @@ void M2ProbMoveState::entryCode() {
     pendingStart  = false;
     softWallEnabled = false;  
     atA_notified_ = false;
+    unityForceCmd_ = VM2::Zero();
+    yLockEnabled_ = false;
+    yLockRef_ = A(1);
+    trialEndNotified_ = false;
     openCSV();
 
 }
@@ -171,7 +176,7 @@ void M2ProbMoveState::entryCode() {
 // Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL / ...)
 void M2ProbMoveState::duringCode() {
 
-    // === GLOBAL COMMAND DRAIN === (STRT/)
+    // === GLOBAL COMMAND DRAIN === (TRBG/FRC2/S_MD/S_CT)
     {
         int guard = 1024; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 1024 commands.
         while (guard-- > 0 && machine && machine->UIserver && machine->UIserver->isCmd()) {
@@ -188,25 +193,39 @@ void M2ProbMoveState::duringCode() {
             std::string cu = trim(c);
             std::transform(cu.begin(), cu.end(), cu.begin(), [](unsigned char ch){ return std::toupper(ch); });
 
-            // Handle STRT command with debounce and pending flag
-            if (cu.rfind("STRT", 0) == 0) {
+            // Handle start command with debounce and pending flag
+            // Accept TRBG from Unity as trial start requests in WAIT_START
+            if (cu.rfind("TRBG", 0) == 0) {
                 double now = running();
                 if (pendingStart) {
-                    spdlog::warn("STRT ignored: already pending (phase={}, Δt={:.3f}s)", (int)currentPhase, (now - lastStrtTime));
+                    spdlog::warn("START ignored: already pending (phase={}, Δt={:.3f}s)", (int)currentPhase, (now - lastStrtTime));
                     machine->UIserver->clearCmd();
                     continue; 
                 }
                 if (lastStrtTime >= 0.0 && (now - lastStrtTime) < strtMinInterval) {
-                    spdlog::warn("STRT ignored due to debounce (Δt={:.3f}s < {:.3f}s)", (now - lastStrtTime), strtMinInterval);
+                    spdlog::warn("START ignored due to debounce (Δt={:.3f}s < {:.3f}s)", (now - lastStrtTime), strtMinInterval);
                     machine->UIserver->clearCmd();
                     continue; 
                 }
                 pendingStart = true;
                 lastStrtTime = now;
                 machine->UIserver->clearCmd();
-                spdlog::info("GLOBAL: STRT captured (pendingStart=true, t={:.3f})", now);
+                spdlog::info("GLOBAL: START captured by '{}' (pendingStart=true, t={:.3f})", cu, now);
                 break; 
-            } 
+            }
+
+            // Continuous Unity->M2 feedback force update (used during TRIAL)
+            if (cu.rfind("FRC2", 0) == 0) {
+                if (a.size() >= 2) {
+                    unityForceCmd_(0) = a[0];
+                    unityForceCmd_(1) = a[1];
+                } else if (a.size() == 1) {
+                    unityForceCmd_(0) = a[0];
+                    unityForceCmd_(1) = 0.0;
+                }
+                machine->UIserver->clearCmd();
+                continue;
+            }
             
             // Handle mode setting commands (S_MD, S_CT) only if betweenTrials is true
             if (cu.rfind("S_MD",0)==0 || cu.rfind("S_CT",0)==0) {
@@ -224,7 +243,7 @@ void M2ProbMoveState::duringCode() {
                         if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
 
                     } else {
-                        if (machine && machine->UIserver) machine->UIserver->sendCmd("ERR ARG");
+                        spdlog::warn("BETWEEN-TRIALS: mode cmd '{}' missing args", cu);
                     }
                 } else {
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
@@ -287,6 +306,8 @@ void M2ProbMoveState::duringCode() {
 
             if (atA_hold) {
                 softWallEnabled = true;
+                yLockEnabled_ = true;
+                yLockRef_ = A(1);
                 betweenTrials = true;
                 currentPhase = WAIT_START;
                 spdlog::info("TO_A -> WAIT_START (betweenTrials=1)");
@@ -343,6 +364,8 @@ void M2ProbMoveState::duringCode() {
                 }
             }
 
+            break;
+
         }
         
         
@@ -353,6 +376,7 @@ void M2ProbMoveState::duringCode() {
                 trialStartTime = running();
                 effortIntegral = 0.0;
                 rawEffortIntegral = 0.0;
+                trialEndNotified_ = false;
 
                 if (machine && machine->UIserver) {
                     // std::ostringstream oss;
@@ -382,29 +406,31 @@ void M2ProbMoveState::duringCode() {
             VM2 dX = robot->getEndEffVelocity();
             double tTrial = running() - trialStartTime;
 
+            VM2 F_internal = VM2::Zero();
+            VM2 F_unity = unityForceCmd_;
+
+            // Keep framework for other combinations but only implement V2_PHRI + V1_POS for now.
+            if (HRIMode_ == V2_PHRI && CtrlMode_ == V1_POS) {
+                // One-DOF sync mode: accept Unity feedback on X only; Y is locked on M2 side.
+                F_unity(1) = 0.0;
+            }
+
+            VM2 F_cmd = F_internal + F_unity;
+            applyForce(F_cmd);
 
             
+            if (tTrial >= trialDurationSec) {
+                if (!trialEndNotified_ && machine && machine->UIserver) {
+                    machine->UIserver->sendCmd("TRND");
+                    trialEndNotified_ = true;
+                    spdlog::info("Log: TRND (tTrial={:.3f}s)", tTrial);
+                }
+                finishedFlag = true;
+            }
 
+            writeCSV(tTrial, X, dX, F_internal, F_unity, F_cmd.norm());
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            break;
 
         }
 
@@ -413,16 +439,17 @@ void M2ProbMoveState::duringCode() {
 
 // Cleanup on ProbMove exit: zero forces, close CSVs, send session summary
 void M2ProbMoveState::exitCode() {
+    unityForceCmd_ = VM2::Zero();
     robot->setEndEffForceWithCompensation(VM2::Zero());
     if (csv.is_open()) csv.close();
 
     // Send session summary message to UI
     if (machine && machine->UIserver) {
-        std::ostringstream oss; // session summary can be expanded with more metadata as needed
-        oss.setf(std::ios::fixed); // fixed-point for consistent formatting
-        oss.precision(3);
-        std::string out = oss.str();
-        sendUI_(out); // Placeholder for session summary command; can be expanded with actual summary data
+        // std::ostringstream oss; // session summary can be expanded with more metadata as needed
+        // oss.setf(std::ios::fixed); // fixed-point for consistent formatting
+        // oss.precision(3);
+        // std::string out = oss.str();
+        // sendUI_(out); // Placeholder for session summary command; can be expanded with actual summary data
         {
             machine->UIserver->sendCmd("SESS");
             spdlog::info("Log:SESS");
@@ -484,6 +511,14 @@ void M2ProbMoveState::applyForce(const VM2& F) {
     // const double y_max = 0.40;   // upper boundary (m)
 
     VM2 F_cmd = F;
+
+    // Global Y-lock after TO_A completion: keep Y near A(1)
+    if (yLockEnabled_) {
+        VM2 X  = robot->getEndEffPosition();
+        VM2 dX = robot->getEndEffVelocity();
+        const double Fy_lock = -yLockK_ * (X(1) - yLockRef_) - yLockD_ * dX(1);
+        F_cmd(1) += Fy_lock;
+    }
 
     if (softWallEnabled) {
         //  read current position and velocity

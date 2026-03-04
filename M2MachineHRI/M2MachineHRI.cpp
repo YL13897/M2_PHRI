@@ -64,8 +64,8 @@ M2MachineHRI::M2MachineHRI() {
 
     // Wire transitions
     addTransition("CalibState", &endCalib,"StandbyState");
-    addTransition("ProbMoveState", &probMoveFinished, "StandbyState");
     addTransition("StandbyState", &toProbOnBtn, "ProbMoveState");
+    addTransition("ProbMoveState", &probMoveFinished, "StandbyState");
 
     // Set initial state to calibration
     setInitState("CalibState"); 

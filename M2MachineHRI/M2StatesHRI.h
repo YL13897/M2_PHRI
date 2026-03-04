@@ -168,8 +168,19 @@ class M2ProbMoveState : public M2TimedState {
         // Commands part: Mode setting
         enum HRIMode { V1_HRI, V2_PHRI };
         HRIMode HRIMode_ = V2_PHRI;
+        int HRI_Mode = 2;
         enum CtrlMode { V1_POS, V2_VEL };
         CtrlMode CtrlMode_ = V2_VEL;
+        int Ctrl_Mode = 2;
+
+        // Unity feedback force command (updated by FRC2, applied in TRIAL)
+        VM2 unityForceCmd_ = VM2::Zero();
+
+        // Global Y-lock (enabled after TO_A is completed)
+        bool yLockEnabled_ = false;
+        double yLockRef_ = 0.0;
+        double yLockK_ = 1200.0;
+        double yLockD_ = 60.0;
 
 
 
@@ -177,6 +188,8 @@ class M2ProbMoveState : public M2TimedState {
         double trialStartTime = 0.0;
         double effortIntegral = 0.0;
         double rawEffortIntegral = 0.0;
+        double trialDurationSec = 30.0;
+        bool trialEndNotified_ = false;
 
 
         // --- UI command debounce ---
