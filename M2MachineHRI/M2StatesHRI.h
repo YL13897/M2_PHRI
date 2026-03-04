@@ -98,6 +98,7 @@ class M2ProbMoveState : public M2TimedState {
         void entryCode() override;
         void duringCode() override;
         void exitCode() override;
+        bool isFinished() const { return finishedFlag; }
         
         // --- Experiment config ---
         VM2 A{0.32, 0.10};
@@ -158,6 +159,7 @@ class M2ProbMoveState : public M2TimedState {
         
         // Notification flags for UI commands
         bool atA_notified_ = false;
+        bool finishedFlag = false;
         
         // Commands part: Mode setting
         enum HRIMode { V1_HRI, V2_PHRI };

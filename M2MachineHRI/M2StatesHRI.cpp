@@ -245,24 +245,16 @@ void M2ProbMoveState::duringCode() {
                 continue;
             }
 
-            // Emergency stop current trial and return to WAIT_START
+            // Emergency stop: finish ProbMove and return Standby via top-level transition
             if (cu.rfind("SESS",0)==0) {
                 if (currentPhase == TRIAL) {
                     unityForceCmd_.setZero();
-                    pendingStart = false;
-                    initTrial = true;
-                    trialEndNotified_ = false;
-                    betweenTrials = true;
-                    softWallEnabled = true;
-                    yLockEnabled_ = true;
-                    yLockRef_ = A(1);
-                    currentPhase = WAIT_START;
-
                     if (machine && machine->UIserver) {
                         machine->UIserver->sendCmd("TRND");
                     }
-                    spdlog::info("SESS received: TRIAL -> WAIT_START");
+                    spdlog::info("SESS received in TRIAL: send TRND then finish ProbMove");
                 }
+                finishedFlag = true;
                 machine->UIserver->clearCmd();
                 continue;
             }
@@ -454,15 +446,8 @@ void M2ProbMoveState::duringCode() {
                     spdlog::info("Log: TRND (tTrial={:.3f}s)", tTrial);
                 }
                 unityForceCmd_.setZero();
-                pendingStart = false;
-                initTrial = true;
-                trialEndNotified_ = false;
-                betweenTrials = true;
-                softWallEnabled = true;
-                yLockEnabled_ = true;
-                yLockRef_ = A(1);
-                currentPhase = WAIT_START;
-                spdlog::info("TRIAL duration reached: return to WAIT_START");
+                finishedFlag = true;
+                spdlog::info("TRIAL duration reached: finish ProbMove and return Standby via top-level transition");
                 break;
             }
 
