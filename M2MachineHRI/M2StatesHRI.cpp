@@ -245,6 +245,28 @@ void M2ProbMoveState::duringCode() {
                 continue;
             }
 
+            // Emergency stop current trial and return to WAIT_START
+            if (cu.rfind("SESS",0)==0) {
+                if (currentPhase == TRIAL) {
+                    unityForceCmd_.setZero();
+                    pendingStart = false;
+                    initTrial = true;
+                    trialEndNotified_ = false;
+                    betweenTrials = true;
+                    softWallEnabled = true;
+                    yLockEnabled_ = true;
+                    yLockRef_ = A(1);
+                    currentPhase = WAIT_START;
+
+                    if (machine && machine->UIserver) {
+                        machine->UIserver->sendCmd("TRND");
+                    }
+                    spdlog::info("SESS received: TRIAL -> WAIT_START");
+                }
+                machine->UIserver->clearCmd();
+                continue;
+            }
+
 
             // If unknown command
             spdlog::warn("GLOBAL: unknown cmd='{}' (trim='{}') @phase={}", c, cu, (int)currentPhase);
@@ -402,20 +424,20 @@ void M2ProbMoveState::duringCode() {
             VM2 F_unity = unityForceCmd_;
 
             // Four-mode framework:
-            // 1) V2_PHRI + V1_POS: implemented (X sync + force, Y locked)
+            // 1. V2_PHRI + V1_POS: implemented (X sync + force, Y locked)
             if (HRIMode_ == V2_PHRI && CtrlMode_ == V1_POS) {
                 F_unity(1) = 0.0;
             }
-            // 2) V2_PHRI + V2_VEL: implemented (X velocity sync + force, Y locked)
+            // 2. V2_PHRI + V2_VEL: implemented (X velocity sync + force, Y locked)
             else if (HRIMode_ == V2_PHRI && CtrlMode_ == V2_VEL) {
                 F_unity(1) = 0.0;
             }
-            // 3) V1_HRI + V1_POS: framework reserved (to be implemented)
+            // 3. V1_HRI + V1_POS: framework reserved (to be implemented)
             else if (HRIMode_ == V1_HRI && CtrlMode_ == V1_POS) {
                 // No force feedback in HRI mode.
                 F_unity.setZero();
             }
-            // 4) V1_HRI + V2_VEL: framework reserved (to be implemented)
+            // 4. V1_HRI + V2_VEL: framework reserved (to be implemented)
             else if (HRIMode_ == V1_HRI && CtrlMode_ == V2_VEL) {
                 // No force feedback in HRI mode.
                 F_unity.setZero();
@@ -431,7 +453,17 @@ void M2ProbMoveState::duringCode() {
                     trialEndNotified_ = true;
                     spdlog::info("Log: TRND (tTrial={:.3f}s)", tTrial);
                 }
-                finishedFlag = true;
+                unityForceCmd_.setZero();
+                pendingStart = false;
+                initTrial = true;
+                trialEndNotified_ = false;
+                betweenTrials = true;
+                softWallEnabled = true;
+                yLockEnabled_ = true;
+                yLockRef_ = A(1);
+                currentPhase = WAIT_START;
+                spdlog::info("TRIAL duration reached: return to WAIT_START");
+                break;
             }
 
             writeCSV(tTrial, X, dX, F_internal, F_unity, F_cmd.norm());
