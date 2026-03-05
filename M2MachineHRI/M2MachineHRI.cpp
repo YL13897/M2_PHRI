@@ -34,7 +34,7 @@ static bool toProbOnBtn(StateMachine& SM){
         // If "BGIN" command received, clear it and transition to ProbMove
         if (cmd == "BGIN") {
             sm.UIserver->clearCmd();
-            sm.UIserver->sendCmd(std::string("OK"));
+            sm.UIserver->sendCmd(std::string("BGOK"));
             spdlog::info("[TRANS] accepting BGIN -> toProb");
             return true;
         }

@@ -152,20 +152,19 @@ void M2ProbMoveState::entryCode() {
     trialEndPositions_.clear();
     currentPhase = TO_A;
     finishedFlag = false;
-    initToA = true;
-    initTrial = true;
-    pendingStart  = false;
-    softWallEnabled = false;  
-    atA_notified_ = false;
+    initToA = true; // will trigger TO_A entry code on first loop
+    initTrial = true; // will trigger TRIAL entry code on first loop
+    pendingStart  = false; // no start pending at entry
+    softWallEnabled = false; 
     unityForceCmd_ = VM2::Zero();
-    yLockEnabled_ = false;
-    yLockRef_ = A(1);
-    trialEndNotified_ = false;
+    yLockEnabled_ = false; // Lock Y movement after reaching A, to encourage strategic planning in X direction
+    trialIndex_ = 0;
     openCSV();
 
 }
 
-// Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL / ...)
+// Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL), 
+// feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
 void M2ProbMoveState::duringCode() {
 
     // === GLOBAL COMMAND DRAIN === (TRBG/FRC2/S_MD/S_CT)
@@ -185,25 +184,49 @@ void M2ProbMoveState::duringCode() {
             std::string cu = trim(c);
             std::transform(cu.begin(), cu.end(), cu.begin(), [](unsigned char ch){ return std::toupper(ch); });
 
-            // Handle start command with debounce and pending flag
-            // Accept TRBG from Unity as trial start requests in WAIT_START
+            
             if (cu.rfind("TRBG", 0) == 0) {
+                if (currentPhase != WAIT_START) {// Handle trial start (TRBG) only in WAIT_START phase
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
+                    spdlog::warn("TRBG rejected: phase={} (only WAIT_START accepts TRBG)", (int)currentPhase);
+                    machine->UIserver->clearCmd();
+                    continue;
+                }
                 double now = running();
                 if (pendingStart) {
-                    spdlog::warn("START ignored: already pending (phase={}, Δt={:.3f}s)", (int)currentPhase, (now - lastStrtTime));
+                    spdlog::warn("START ignored: already pending (phase={}, Δt={:.3f}s)", (int)currentPhase, (now - lastStartTime));
                     machine->UIserver->clearCmd();
                     continue; 
                 }
-                if (lastStrtTime >= 0.0 && (now - lastStrtTime) < strtMinInterval) {
-                    spdlog::warn("START ignored due to debounce (Δt={:.3f}s < {:.3f}s)", (now - lastStrtTime), strtMinInterval);
+                if (lastStartTime >= 0.0 && (now - lastStartTime) < startMinInterval) {
+                    spdlog::warn("START ignored due to debounce (Δt={:.3f}s < {:.3f}s)", (now - lastStartTime), startMinInterval);
                     machine->UIserver->clearCmd();
                     continue; 
                 }
                 pendingStart = true;
-                lastStrtTime = now;
+                lastStartTime = now;
                 machine->UIserver->clearCmd();
                 spdlog::info("GLOBAL: START captured by '{}' (pendingStart=true, t={:.3f})", cu, now);
                 break; 
+            }
+
+            // Manual return to TO_A from WAIT_START
+            if (cu.rfind("TO_A", 0) == 0) {
+                if (currentPhase == WAIT_START) {
+                    pendingStart = false;
+                    initToA = true;
+                    inBandSince = 0.0;
+                    softWallEnabled = false;
+                    yLockEnabled_ = false;
+                    currentPhase = TO_A;
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
+                    spdlog::info("WAIT_START: TO_A received -> TO_A");
+                } else {
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
+                    spdlog::warn("TO_A rejected: phase={} (only WAIT_START accepts TO_A)", (int)currentPhase);
+                }
+                machine->UIserver->clearCmd();
+                continue;
             }
 
             // Continuous Unity->M2 feedback force update (used during TRIAL)
@@ -219,27 +242,27 @@ void M2ProbMoveState::duringCode() {
                 continue;
             }
             
-            // Handle mode setting commands (S_MD, S_CT) only if betweenTrials is true
+            // Handle mode setting commands (S_MD, S_CT) only in WAIT_START
             if (cu.rfind("S_MD",0)==0 || cu.rfind("S_CT",0)==0) {
-                if (betweenTrials) {
+                if (currentPhase == WAIT_START) {
                     if (cu.rfind("S_MD",0)==0 && !a.empty()) {
                         HRI_Mode = (int)std::round(a[0]);
                         HRIMode_ = (HRI_Mode == 2) ? V2_PHRI : V1_HRI;
-                        spdlog::info("BETWEEN-TRIALS: S_MD -> mode={}", HRI_Mode);
+                        spdlog::info("WAIT_START: S_MD -> mode={}", HRI_Mode);
                         if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
 
                     } else if (cu.rfind("S_CT",0)==0 && !a.empty()) {
                         Ctrl_Mode = (int)std::round(a[0]);
                         CtrlMode_ = (Ctrl_Mode == 2) ? V2_VEL : V1_POS;
-                        spdlog::info("BETWEEN-TRIALS: S_CT -> mode={}", Ctrl_Mode);
+                        spdlog::info("WAIT_START: S_CT -> mode={}", Ctrl_Mode);
                         if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
 
                     } else {
-                        spdlog::warn("BETWEEN-TRIALS: mode cmd '{}' missing args", cu);
+                        spdlog::warn("WAIT_START: mode cmd '{}' missing args", cu);
                     }
                 } else {
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
-                    spdlog::warn("PARAM LOCKED: '{}' rejected (phase={}, betweenTrials=0)", cu, (int)currentPhase);
+                    spdlog::warn("PARAM LOCKED: '{}' rejected (phase={}, only WAIT_START allowed)", cu, (int)currentPhase);
                 }
                 machine->UIserver->clearCmd();
                 continue;
@@ -247,18 +270,12 @@ void M2ProbMoveState::duringCode() {
 
             // Emergency stop: finish ProbMove and return Standby via top-level transition
             if (cu.rfind("SESS",0)==0) {
-                if (currentPhase == TRIAL) {
-                    unityForceCmd_.setZero();
-                    if (machine && machine->UIserver) {
-                        machine->UIserver->sendCmd("TRND");
-                    }
-                    spdlog::info("SESS received in TRIAL: send TRND then finish ProbMove");
-                }
+                unityForceCmd_.setZero();
                 finishedFlag = true;
+                spdlog::info("SESS received: finish ProbMove and return Standby");
                 machine->UIserver->clearCmd();
                 continue;
             }
-
 
             // If unknown command
             spdlog::warn("GLOBAL: unknown cmd='{}' (trim='{}') @phase={}", c, cu, (int)currentPhase);
@@ -293,30 +310,26 @@ void M2ProbMoveState::duringCode() {
 
             // Transition condition check
             double distA = (A - X).norm();
-            bool atA_hold = false;
-            if (distA < epsA_hold) {
+            atA_hold = false;
+            if (distA < epsA_hold) { // within hold threshold
                 if (inBandSince == 0.0) {
                     inBandSince = running();}
-                else if ((running() - inBandSince) >= holdTimeA) {
-                    atA_hold = true;
-                    if (machine && machine->UIserver && !atA_notified_) {         
+                else if ((running() - inBandSince) >= holdTimeA) { // held for required time
+                    atA_hold = true; 
+                    if (machine && machine->UIserver) {         
                         machine->UIserver->sendCmd("AT_A"); 
-                        atA_notified_ = true;
                         spdlog::info("Checked, atA_hold!");
                     }     
                 }
             } else {
                 inBandSince = 0.0;
-                atA_notified_ = false;
             }
 
             if (atA_hold) {
                 softWallEnabled = true;
                 yLockEnabled_ = true;
-                yLockRef_ = A(1);
-                betweenTrials = true;
                 currentPhase = WAIT_START;
-                spdlog::info("TO_A -> WAIT_START (betweenTrials=1)");
+                spdlog::info("TO_A -> WAIT_START");
             }
             break;
         }
@@ -332,31 +345,9 @@ void M2ProbMoveState::duringCode() {
             //     s.force = robot->getEndEffForce();
             // }
 
-            VM2 X = robot->getEndEffPosition();
-            double distToA = (A - X).norm();
-            bool atA_hold = false;           
-            if (distToA < epsA_hold) {
-                if (inBandSince == 0.0) inBandSince = running();
-                else if ((running() - inBandSince) >= holdTimeA) {
-                    atA_hold = true;
-                    if (machine && machine->UIserver && !atA_notified_) {
-                        machine->UIserver->sendCmd("AT_A");  // Send p[0] = currentTrialProb_
-                        atA_notified_ = true;
-                        spdlog::info("WAIT_START: Checked, atA_hold!");
-                    }
-                }
-            } else {
-                inBandSince = 0.0;
-                atA_notified_ = false;
-            }
-
             if (pendingStart && atA_hold) {
-                // On STRT: evaluate last preload window and log
-
-                // const double tNow = running();
 
                 pendingStart  = false;
-                betweenTrials = false;
                 initTrial     = true;
                 currentPhase  = TRIAL;
 
@@ -365,37 +356,25 @@ void M2ProbMoveState::duringCode() {
                 break; 
 
             } else if (pendingStart && !atA_hold) {
+                // Wait until manual set to AT_A or auto-detected atA_hold to transition to TRIAL
                 if (iterations() % 1000 == 1) {
-                    spdlog::info("WAIT_START: STRT pending but not at A (dist={:.3f} <? {:.3f})", distToA, epsA_hold);
-                }
+                    spdlog::info("WAIT_START: pendingStart consumed but atA_hold=0");
+                } 
             }
-
             break;
-
         }
         
-        
+        // --- TRIAL: main trial loop with feedback control and trial end check ---
         case TRIAL: {
 
             if (initTrial) {
                 // Simulate entryCode() for TRIAL
                 trialStartTime = running();
-                effortIntegral = 0.0;
-                rawEffortIntegral = 0.0;
-                trialEndNotified_ = false;
+                // effortIntegral = 0.0;
+                // rawEffortIntegral = 0.0;
+                ++trialIndex_;
 
                 if (machine && machine->UIserver) {
-                    // std::ostringstream oss;
-                    // oss.setf(std::ios::fixed);
-                    // oss.precision(3);
-
-                    // oss << "TRIAL_BEGIN t=" << trialStartTime
-                    //     << " HRI_Mode=" << (HRIMode_ == V2_PHRI ? 2 : 1)
-                    //     << " Ctrl_Mode=" << (CtrlMode_ == V2_VEL ? 2 : 1)
-
-                    // std::string outBegin = oss.str();
-                    // sendUI_(outBegin);
-
                     {
                         std::vector<double> p; 
                         p.push_back(trialStartTime);                      // t
@@ -410,6 +389,7 @@ void M2ProbMoveState::duringCode() {
 
             VM2 X = robot->getEndEffPosition();
             VM2 dX = robot->getEndEffVelocity();
+            VM2 F_handle = robot->getEndEffForce();
             double tTrial = running() - trialStartTime;
 
             VM2 F_internal = VM2::Zero();
@@ -418,11 +398,11 @@ void M2ProbMoveState::duringCode() {
             // Four-mode framework:
             // 1. V2_PHRI + V1_POS: implemented (X sync + force, Y locked)
             if (HRIMode_ == V2_PHRI && CtrlMode_ == V1_POS) {
-                F_unity(1) = 0.0;
+                F_unity(1) = 0.0; // Y force cmd ignored in position control mode to maintain Y-lock
             }
             // 2. V2_PHRI + V2_VEL: implemented (X velocity sync + force, Y locked)
             else if (HRIMode_ == V2_PHRI && CtrlMode_ == V2_VEL) {
-                F_unity(1) = 0.0;
+                F_unity(1) = 0.0; // Y force cmd ignored in velocity control mode to maintain Y-lock
             }
             // 3. V1_HRI + V1_POS: framework reserved (to be implemented)
             else if (HRIMode_ == V1_HRI && CtrlMode_ == V1_POS) {
@@ -440,18 +420,20 @@ void M2ProbMoveState::duringCode() {
 
             
             if (tTrial >= trialDurationSec) {
-                if (!trialEndNotified_ && machine && machine->UIserver) {
+                if (machine && machine->UIserver) {
                     machine->UIserver->sendCmd("TRND");
-                    trialEndNotified_ = true;
                     spdlog::info("Log: TRND (tTrial={:.3f}s)", tTrial);
                 }
                 unityForceCmd_.setZero();
-                finishedFlag = true;
-                spdlog::info("TRIAL duration reached: finish ProbMove and return Standby via top-level transition");
+                pendingStart = false;
+                initTrial = true;
+                currentPhase = WAIT_START;
+                inBandSince = 0.0;
+                spdlog::info("TRIAL duration reached: TRIAL -> WAIT_START");
                 break;
             }
 
-            writeCSV(tTrial, X, dX, F_internal, F_unity, F_cmd.norm());
+            writeCSV(tTrial, X, dX, F_handle, F_internal, F_unity, F_cmd.norm());
 
             break;
 
@@ -468,11 +450,6 @@ void M2ProbMoveState::exitCode() {
 
     // Send session summary message to UI
     if (machine && machine->UIserver) {
-        // std::ostringstream oss; // session summary can be expanded with more metadata as needed
-        // oss.setf(std::ios::fixed); // fixed-point for consistent formatting
-        // oss.precision(3);
-        // std::string out = oss.str();
-        // sendUI_(out); // Placeholder for session summary command; can be expanded with actual summary data
         {
             machine->UIserver->sendCmd("SESS");
             spdlog::info("Log:SESS");
@@ -539,7 +516,7 @@ void M2ProbMoveState::applyForce(const VM2& F) {
     if (yLockEnabled_) {
         VM2 X  = robot->getEndEffPosition();
         VM2 dX = robot->getEndEffVelocity();
-        const double Fy_lock = -yLockK_ * (X(1) - yLockRef_) - yLockD_ * dX(1);
+        const double Fy_lock = -yLockK_ * (X(1) - A(1)) - yLockD_ * dX(1);
         F_cmd(1) += Fy_lock;
     }
 
@@ -593,20 +570,24 @@ void M2ProbMoveState::openCSV() {
         return;
     }
     if (csv.tellp() == 0) {
-        csv << "time,sys_time,session_id,pos_x,pos_y,vel_x,vel_y,internal_fx,internal_fy,user_fx,user_fy,effort\n";
+        csv << "trial_index,time_trial,sys_time,session_id,hri_mode,ctrl_mode,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort\n";
     }
 }
 
 // Write a row to the ProbMove CSV with current trial data and metadata
-void M2ProbMoveState::writeCSV(double t, const VM2& pos, const VM2& vel,
-    const VM2& fInternal, const VM2& fUser, double effort) {
+void M2ProbMoveState::writeCSV(double tTrial, const VM2& pos, const VM2& vel,
+    const VM2& handleForce, const VM2& fInternal, const VM2& fUser, double effort) {
     if (!csv.is_open()) return;
     const double sys_t = system_time_sec();
     const std::string sid = (machine ? machine->sessionId : std::string("UNSET"));
     csv << std::fixed << std::setprecision(6)
-        << t << "," << sys_t << "," << sid << ","
+        << trialIndex_ << ","
+        << tTrial << "," << sys_t << "," << sid << ","
+        << ((HRIMode_ == V2_PHRI) ? 2 : 1) << ","
+        << ((CtrlMode_ == V2_VEL) ? 2 : 1) << ","
         << pos(0) << "," << pos(1) << ","
         << vel(0) << "," << vel(1) << ","
+        << handleForce(0) << "," << handleForce(1) << ","
         << fInternal(0) << "," << fInternal(1) << ","
         << fUser(0) << "," << fUser(1) << ","
         << effort << "\n";

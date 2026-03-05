@@ -98,6 +98,7 @@ class M2ProbMoveState : public M2TimedState {
         void entryCode() override;
         void duringCode() override;
         void exitCode() override;
+
         bool isFinished() const { return finishedFlag; }
         
         // --- Experiment config ---
@@ -117,6 +118,7 @@ class M2ProbMoveState : public M2TimedState {
         double forceSaturation   = 80.0;
 
         // --- ToA related variables ---
+        bool atA_hold = false;
         double holdTimeA  = 1;
         double epsA_hold  = 0.02;
         double inBandSince = 0.0;
@@ -131,7 +133,7 @@ class M2ProbMoveState : public M2TimedState {
         VM2 readUserForce();
         void resetToAPlan(const VM2& Xnow);
         void openCSV();
-        void writeCSV(double t, const VM2& pos, const VM2& vel, const VM2& fInternal, const VM2& fUser, double effort);
+        void writeCSV(double tTrial, const VM2& pos, const VM2& vel, const VM2& handleForce, const VM2& fInternal, const VM2& fUser, double effort);
         void applyForce(const VM2& F);
 
     private:
@@ -154,11 +156,9 @@ class M2ProbMoveState : public M2TimedState {
         // Flags to simulate entryCode() for each phase
         bool initToA = true;
         bool initTrial = true;
-        bool pendingStart = false;  // captured STRT; consumed only in WAIT_START
-        bool betweenTrials = false; // true only in WAIT_START between trials; allows S_MD/S_MT/S_TS
+        bool pendingStart = false;  // captured TRBG; consumed only in WAIT_START
         
-        // Notification flags for UI commands
-        bool atA_notified_ = false;
+        // Session finish flag for top-level transition
         bool finishedFlag = false;
         
         // Commands part: Mode setting
@@ -174,24 +174,20 @@ class M2ProbMoveState : public M2TimedState {
 
         // Global Y-lock (enabled after TO_A is completed)
         bool yLockEnabled_ = false;
-        double yLockRef_ = 0.0;
         double yLockK_ = 1200.0;
         double yLockD_ = 60.0;
 
-
-
         // TRIAL part: scoring and trial end detection
         double trialStartTime = 0.0;
-        double effortIntegral = 0.0;
-        double rawEffortIntegral = 0.0;
+        // double effortIntegral = 0.0;
+        // double rawEffortIntegral = 0.0;
         double trialDurationSec = 30.0;
-        bool trialEndNotified_ = false;
-
+        int trialIndex_ = 0;
 
         // --- UI command debounce ---
-        // STRT debounce (seconds)
-        double lastStrtTime = -1.0; // last accepted STRT command time for debounce
-        double strtMinInterval = 1.0; // minimum interval between accepted STRT commands
+        // TRBG debounce (seconds)
+        double lastStartTime = -1.0; // last accepted TRBG time for debounce
+        double startMinInterval = 1.0; // minimum interval between accepted TRBG commands
         
         std::ofstream csv; // CSV file stream for logging
 
@@ -206,7 +202,7 @@ class M2ProbMoveState : public M2TimedState {
         // Helper to send a command to the UI server with logging
         void sendUI_(const std::string& msg);
 
-        
+
         // -------------------------------------------------------------
         // ------------------------ Optional ---------------------------
 
