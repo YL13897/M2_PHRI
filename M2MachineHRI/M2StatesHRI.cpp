@@ -159,6 +159,7 @@ void M2ProbMoveState::entryCode() {
     unityForceCmd_ = VM2::Zero();
     disturbanceActive_ = false;
     yLockEnabled_ = false; // Lock Y movement after reaching A, to encourage strategic planning in X direction
+    waitLatchEnabled_ = false;
     trialIndex_ = 0;
     openCSV();
 
@@ -168,7 +169,7 @@ void M2ProbMoveState::entryCode() {
 // feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
 void M2ProbMoveState::duringCode() {
 
-    // === GLOBAL COMMAND DRAIN === (TRBG/FRC2/DSTR/S_MD/S_CT)
+    // === GLOBAL COMMAND DRAIN === (TRBG/RWST/FRC2/DSTR/S_MD/S_CT)
     {
         int guard = 1024; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 1024 commands.
         while (guard-- > 0 && machine && machine->UIserver && machine->UIserver->isCmd()) {
@@ -211,6 +212,30 @@ void M2ProbMoveState::duringCode() {
                 break; 
             }
 
+            // Manual return to WAIT_START from TRIAL for quick reconfiguration.
+            if (cu.rfind("RWST", 0) == 0) {
+                if (currentPhase == TRIAL) {
+                    unityForceCmd_.setZero();
+                    pendingStart = false;
+                    initToA = true;
+                    inBandSince = 0.0;
+                    softWallEnabled = false;
+                    yLockEnabled_ = false;
+                    waitLatchEnabled_ = false;
+                    currentPhase = TO_A; // briefly return to TO_A to reset position, then will move back to WAIT_START due to waitLatchEnabled_
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("RWOK");
+                    spdlog::info("TRIAL: RWST received -> WAIT_START");
+                } else if (currentPhase == WAIT_START) {
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("RWOK");
+                    spdlog::info("WAIT_START: RWST received -> already in WAIT_START");
+                } else {
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
+                    spdlog::warn("RWST rejected: phase={} (only TRIAL/WAIT_START accepts RWST)", (int)currentPhase);
+                }
+                machine->UIserver->clearCmd();
+                continue;
+            }
+
             // Manual return to TO_A from WAIT_START
             if (cu.rfind("TO_A", 0) == 0) {
                 if (currentPhase == WAIT_START) {
@@ -219,6 +244,7 @@ void M2ProbMoveState::duringCode() {
                     inBandSince = 0.0;
                     softWallEnabled = false;
                     yLockEnabled_ = false;
+                    waitLatchEnabled_ = false;
                     currentPhase = TO_A;
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
                     spdlog::info("WAIT_START: TO_A received -> TO_A");
@@ -245,7 +271,7 @@ void M2ProbMoveState::duringCode() {
 
             // Disturbance active flag from Unity: DSTR [0/1]
             if (cu.rfind("DSTR", 0) == 0) {
-                disturbanceActive_ = (!a.empty() && a[0] > 0.5);
+                disturbanceActive_ = (!a.empty() && a[0] > 0.5); //  0.5 threshold for boolean flag 
                 if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
                 machine->UIserver->clearCmd();
                 continue;
@@ -280,6 +306,7 @@ void M2ProbMoveState::duringCode() {
             // Emergency stop: finish ProbMove and return Standby via top-level transition
             if (cu.rfind("SESS",0)==0) {
                 unityForceCmd_.setZero();
+                waitLatchEnabled_ = false;
                 finishedFlag = true;
                 spdlog::info("SESS received: finish ProbMove and return Standby");
                 machine->UIserver->clearCmd();
@@ -354,10 +381,27 @@ void M2ProbMoveState::duringCode() {
             //     s.force = robot->getEndEffForce();
             // }
 
+            // Arm WAIT_START latch only after TO_A has confirmed AT_A hold.
+            if (atA_hold && !waitLatchEnabled_) {
+                waitLatchEnabled_ = true;
+                spdlog::info("WAIT_START: wait_latch enabled");
+            }
+
+            // Virtual spring-damper around point A to reduce free handle motion during WAIT_START.
+            if (waitLatchEnabled_) {
+                const VM2 X = robot->getEndEffPosition();
+                const VM2 dX = robot->getEndEffVelocity();
+                const VM2 F_wait = waitLatchK_ * (A - X) - waitLatchD_ * dX;
+                applyForce(F_wait);
+            } else {
+                applyForce(VM2::Zero());
+            }
+
             if (pendingStart && atA_hold) {
 
                 pendingStart  = false;
                 initTrial     = true;
+                waitLatchEnabled_ = false; // unlock latch when entering TRIAL
                 currentPhase  = TRIAL;
 
                 if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
@@ -439,6 +483,7 @@ void M2ProbMoveState::duringCode() {
                 unityForceCmd_.setZero();
                 pendingStart = false;
                 initTrial = true;
+                waitLatchEnabled_ = false;
                 currentPhase = WAIT_START;
                 inBandSince = 0.0;
                 spdlog::info("TRIAL duration reached: TRIAL -> WAIT_START");
@@ -457,6 +502,7 @@ void M2ProbMoveState::duringCode() {
 // Cleanup on ProbMove exit: zero forces, close CSVs, send session summary
 void M2ProbMoveState::exitCode() {
     unityForceCmd_ = VM2::Zero();
+    waitLatchEnabled_ = false;
     robot->setEndEffForceWithCompensation(VM2::Zero());
     if (csv.is_open()) csv.close();
 
@@ -516,8 +562,8 @@ void M2ProbMoveState::resetToAPlan(const VM2& Xnow) {
 // Apply force command with optional soft wall constraints
 void M2ProbMoveState::applyForce(const VM2& F) {
 
-    // const double x_min = 0.18;   // left boundary (m)
-    // const double x_max = 0.46;   // left boundary (m)
+    // const double x_min = 0.16;   // left boundary (m)
+    // const double x_max = 0.48;   // left boundary (m)
     // const double k_wall = 800.0; // wall stiffness N/m
     // const double d_wall = 40.0;  // wall damping N·s/m
     // const double y_max = 0.40;   // upper boundary (m)

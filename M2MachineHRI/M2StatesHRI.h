@@ -107,8 +107,8 @@ class M2ProbMoveState : public M2TimedState {
         
         // --- Workspace limits and wall config ---
         bool softWallEnabled = false; // only enable walls after reaching A
-        const double x_min = 0.18;   // left boundary (m)
-        const double x_max = 0.46;   // left boundary (m)
+        const double x_min = 0.16;   // left boundary (m)
+        const double x_max = 0.48;   // left boundary (m)
         const double k_wall = 800.0; // wall stiffness N/m
         const double d_wall = 40.0;  // wall damping N·s/m
         const double y_max = 0.40;   // upper boundary (m)
@@ -180,6 +180,12 @@ class M2ProbMoveState : public M2TimedState {
         bool yLockEnabled_ = false;
         double yLockK_ = 1200.0;
         double yLockD_ = 60.0;
+
+        // WAIT_START latch: after AT_A is achieved, hold around A with a virtual spring-damper.
+        // Released when transitioning into TRIAL.
+        bool waitLatchEnabled_ = false;
+        double waitLatchK_ = 700.0;
+        double waitLatchD_ = 40.0;
 
         // TRIAL part: scoring and trial end detection
         double trialStartTime = 0.0;

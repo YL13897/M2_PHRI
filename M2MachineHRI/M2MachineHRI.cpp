@@ -7,6 +7,8 @@
 
 
 #include "M2MachineHRI.h"
+#include <algorithm>
+#include <cctype>
 
 
 // ----------------------------------------------------------------------------
@@ -31,8 +33,17 @@ static bool toProbOnBtn(StateMachine& SM){
         std::string cmd; std::vector<double> v;
         sm.UIserver->getCmd(cmd, v);
 
+        auto trim = [](std::string s){
+            auto notspace = [](int ch){ return !std::isspace(ch); };
+            s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
+            s.erase(std::find_if(s.rbegin(), s.rend(), notspace).base(), s.end());
+            return s;
+        };
+        std::string cu = trim(cmd);
+        std::transform(cu.begin(), cu.end(), cu.begin(), [](unsigned char ch){ return std::toupper(ch); });
+
         // If "BGIN" command received, clear it and transition to ProbMove
-        if (cmd == "BGIN") {
+        if (cu.rfind("BGIN", 0) == 0) {
             sm.UIserver->clearCmd();
             sm.UIserver->sendCmd(std::string("BGOK"));
             spdlog::info("[TRANS] accepting BGIN -> toProb");
@@ -40,7 +51,7 @@ static bool toProbOnBtn(StateMachine& SM){
         }
         // If unknown command received, clear it and log a warning
         else {
-            spdlog::warn("Unexpected cmd='{}' received. Ignoring.", cmd);
+            spdlog::warn("Unexpected cmd='{}' (trim='{}') received. Ignoring.", cmd, cu);
             sm.UIserver->clearCmd();
         }
     }
