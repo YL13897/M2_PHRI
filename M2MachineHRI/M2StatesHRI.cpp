@@ -157,6 +157,7 @@ void M2ProbMoveState::entryCode() {
     pendingStart  = false; // no start pending at entry
     softWallEnabled = false; 
     unityForceCmd_ = VM2::Zero();
+    disturbanceActive_ = false;
     yLockEnabled_ = false; // Lock Y movement after reaching A, to encourage strategic planning in X direction
     trialIndex_ = 0;
     openCSV();
@@ -167,7 +168,7 @@ void M2ProbMoveState::entryCode() {
 // feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
 void M2ProbMoveState::duringCode() {
 
-    // === GLOBAL COMMAND DRAIN === (TRBG/FRC2/S_MD/S_CT)
+    // === GLOBAL COMMAND DRAIN === (TRBG/FRC2/DSTR/S_MD/S_CT)
     {
         int guard = 1024; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 1024 commands.
         while (guard-- > 0 && machine && machine->UIserver && machine->UIserver->isCmd()) {
@@ -238,6 +239,14 @@ void M2ProbMoveState::duringCode() {
                     unityForceCmd_(0) = a[0];
                     unityForceCmd_(1) = 0.0;
                 }
+                machine->UIserver->clearCmd();
+                continue;
+            }
+
+            // Disturbance active flag from Unity: DSTR [0/1]
+            if (cu.rfind("DSTR", 0) == 0) {
+                disturbanceActive_ = (!a.empty() && a[0] > 0.5);
+                if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
                 machine->UIserver->clearCmd();
                 continue;
             }
@@ -398,11 +407,14 @@ void M2ProbMoveState::duringCode() {
             // Four-mode framework:
             // 1. V2_PHRI + V1_POS: implemented (X sync + force, Y locked)
             if (HRIMode_ == V2_PHRI && CtrlMode_ == V1_POS) {
-                F_unity(1) = 0.0; // Y force cmd ignored in position control mode to maintain Y-lock
+                // Native pHRI force generation on M2 side: disturbance only when active.
+                F_unity.setZero();
+                if (disturbanceActive_) F_internal(0) += disturbanceForceX_;
             }
             // 2. V2_PHRI + V2_VEL: implemented (X velocity sync + force, Y locked)
             else if (HRIMode_ == V2_PHRI && CtrlMode_ == V2_VEL) {
-                F_unity(1) = 0.0; // Y force cmd ignored in velocity control mode to maintain Y-lock
+                F_unity.setZero();
+                if (disturbanceActive_) F_internal(0) += disturbanceForceX_;
             }
             // 3. V1_HRI + V1_POS: framework reserved (to be implemented)
             else if (HRIMode_ == V1_HRI && CtrlMode_ == V1_POS) {
@@ -504,8 +516,8 @@ void M2ProbMoveState::resetToAPlan(const VM2& Xnow) {
 // Apply force command with optional soft wall constraints
 void M2ProbMoveState::applyForce(const VM2& F) {
 
-    // const double x_min = 0.15;   // left boundary (m)
-    // const double x_max = 0.45;   // left boundary (m)
+    // const double x_min = 0.18;   // left boundary (m)
+    // const double x_max = 0.46;   // left boundary (m)
     // const double k_wall = 800.0; // wall stiffness N/m
     // const double d_wall = 40.0;  // wall damping N·s/m
     // const double y_max = 0.40;   // upper boundary (m)
