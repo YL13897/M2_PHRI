@@ -157,6 +157,7 @@ class M2ProbMoveState : public M2TimedState {
         bool initToA = true;
         bool initTrial = true;
         bool pendingStart = false;  // captured TRBG; consumed only in WAIT_START
+        bool rwstAckPending_ = false; // defer RWOK until TO_A has reached A and entered WAIT_START
         
         // Session finish flag for top-level transition
         bool finishedFlag = false;
@@ -191,7 +192,7 @@ class M2ProbMoveState : public M2TimedState {
         double trialStartTime = 0.0;
         // double effortIntegral = 0.0;
         // double rawEffortIntegral = 0.0;
-        double trialDurationSec = 30.0;
+        double trialDurationSec = 300.0;
         int trialIndex_ = 0;
 
         // --- UI command debounce ---

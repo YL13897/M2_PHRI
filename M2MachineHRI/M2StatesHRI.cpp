@@ -155,6 +155,7 @@ void M2ProbMoveState::entryCode() {
     initToA = true; // will trigger TO_A entry code on first loop
     initTrial = true; // will trigger TRIAL entry code on first loop
     pendingStart  = false; // no start pending at entry
+    rwstAckPending_ = false;
     softWallEnabled = false; 
     unityForceCmd_ = VM2::Zero();
     disturbanceActive_ = false;
@@ -222,10 +223,11 @@ void M2ProbMoveState::duringCode() {
                     softWallEnabled = false;
                     yLockEnabled_ = false;
                     waitLatchEnabled_ = false;
+                    rwstAckPending_ = true;
                     currentPhase = TO_A; // briefly return to TO_A to reset position, then will move back to WAIT_START due to waitLatchEnabled_
-                    if (machine && machine->UIserver) machine->UIserver->sendCmd("RWOK");
-                    spdlog::info("TRIAL: RWST received -> WAIT_START");
+                    spdlog::info("TRIAL: RWST received -> TO_A (defer RWOK until WAIT_START at A)");
                 } else if (currentPhase == WAIT_START) {
+                    rwstAckPending_ = false;
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("RWOK");
                     spdlog::info("WAIT_START: RWST received -> already in WAIT_START");
                 } else {
@@ -261,9 +263,6 @@ void M2ProbMoveState::duringCode() {
                 if (a.size() >= 2) {
                     unityForceCmd_(0) = a[0];
                     unityForceCmd_(1) = a[1];
-                } else if (a.size() == 1) {
-                    unityForceCmd_(0) = a[0];
-                    unityForceCmd_(1) = 0.0;
                 }
                 machine->UIserver->clearCmd();
                 continue;
@@ -365,6 +364,11 @@ void M2ProbMoveState::duringCode() {
                 softWallEnabled = true;
                 yLockEnabled_ = true;
                 currentPhase = WAIT_START;
+                if (rwstAckPending_) {
+                    rwstAckPending_ = false;
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("RWOK");
+                    spdlog::info("RWST completed: reached A and entered WAIT_START -> RWOK");
+                }
                 spdlog::info("TO_A -> WAIT_START");
             }
             break;
@@ -472,6 +476,7 @@ void M2ProbMoveState::duringCode() {
             }
 
             VM2 F_cmd = F_internal + F_unity;
+            F_cmd(1) = 0.0; // Y force locked, only apply X direction force
             applyForce(F_cmd);
 
             
@@ -628,7 +633,7 @@ void M2ProbMoveState::openCSV() {
         return;
     }
     if (csv.tellp() == 0) {
-        csv << "trial_index,time_trial,sys_time,session_id,hri_mode,ctrl_mode,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort\n";
+        csv << "trial_index,time_trial,sys_time,session_id,hri_mode,ctrl_mode,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort,disturbance_active\n";
     }
 }
 
@@ -648,5 +653,6 @@ void M2ProbMoveState::writeCSV(double tTrial, const VM2& pos, const VM2& vel,
         << handleForce(0) << "," << handleForce(1) << ","
         << fInternal(0) << "," << fInternal(1) << ","
         << fUser(0) << "," << fUser(1) << ","
-        << effort << "\n";
+        << effort << ","
+        << (disturbanceActive_ ? 1 : 0) << "\n";
 }
