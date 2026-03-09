@@ -210,7 +210,15 @@ void M2ProbMoveState::duringCode() {
                 lastStartTime = now;
                 machine->UIserver->clearCmd();
                 spdlog::info("GLOBAL: START captured by '{}' (pendingStart=true, t={:.3f})", cu, now);
-                break; 
+                continue;
+            }
+
+            // While in ProbMove, BGIN is not a valid command. Return BUSY to avoid silent loss.
+            if (cu.rfind("BGIN", 0) == 0) {
+                if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
+                spdlog::warn("BGIN rejected in ProbMove: phase={}", (int)currentPhase);
+                machine->UIserver->clearCmd();
+                continue;
             }
 
             // Manual return to WAIT_START from TRIAL for quick reconfiguration.
@@ -309,7 +317,7 @@ void M2ProbMoveState::duringCode() {
                 finishedFlag = true;
                 spdlog::info("SESS received: finish ProbMove and return Standby");
                 machine->UIserver->clearCmd();
-                continue;
+                break;
             }
 
             // If unknown command
