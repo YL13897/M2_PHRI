@@ -53,10 +53,10 @@ dkms.conf
 
 .DS_Store
 
-Unity-Ui/M2_Ui/*
-!Unity-Ui/M2_Ui/Assets/
-!Unity-Ui/M2_Ui/Packages/
-!Unity-Ui/M2_Ui/ProjectSettings/
+Unity_Rover/*
+!Unity_Rover/Assets/
+!Unity_Rover/Packages/
+!Unity_Rover/ProjectSettings/
 
 .vscode/
 *.code-workspace
