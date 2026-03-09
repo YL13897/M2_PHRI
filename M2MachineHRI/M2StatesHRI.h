@@ -198,7 +198,7 @@ class M2ProbMoveState : public M2TimedState {
         // --- UI command debounce ---
         // TRBG debounce (seconds)
         double lastStartTime = -1.0; // last accepted TRBG time for debounce
-        double startMinInterval = 1.0; // minimum interval between accepted TRBG commands
+        double startMinInterval = 0.5; // minimum interval between accepted TRBG commands
         
         std::ofstream csv; // CSV file stream for logging
 
