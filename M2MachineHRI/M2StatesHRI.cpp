@@ -190,9 +190,9 @@ void M2ProbMoveState::duringCode() {
 
             
             if (cu.rfind("TRBG", 0) == 0) {
-                if (currentPhase != WAIT_START) {// Handle trial start (TRBG) only in WAIT_START phase
+                if (currentPhase == TRIAL) {
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
-                    spdlog::warn("TRBG rejected: phase={} (only WAIT_START accepts TRBG)", (int)currentPhase);
+                    spdlog::warn("TRBG rejected: phase={} (TRIAL rejects TRBG)", (int)currentPhase);
                     machine->UIserver->clearCmd();
                     continue;
                 }
@@ -210,7 +210,7 @@ void M2ProbMoveState::duringCode() {
                 pendingStart = true;
                 lastStartTime = now;
                 machine->UIserver->clearCmd();
-                spdlog::info("GLOBAL: START captured by '{}' (pendingStart=true, t={:.3f})", cu, now);
+                spdlog::info("GLOBAL: START captured by '{}' (pendingStart=true, phase={}, t={:.3f})", cu, (int)currentPhase, now);
                 continue;
             }
 
@@ -285,19 +285,19 @@ void M2ProbMoveState::duringCode() {
                 continue;
             }
             
-            // Handle mode setting commands (S_MD, S_CT) only in WAIT_START
+            // Handle mode setting commands (S_MD, S_CT) in WAIT_START/TO_A
             if (cu.rfind("S_MD",0)==0 || cu.rfind("S_CT",0)==0) {
-                if (currentPhase == WAIT_START) {
+                if (currentPhase == WAIT_START || currentPhase == TO_A) {
                     if (cu.rfind("S_MD",0)==0 && !a.empty()) {
                         HRI_Mode = (int)std::round(a[0]);
                         HRIMode_ = (HRI_Mode == 2) ? V2_PHRI : V1_HRI;
-                        spdlog::info("WAIT_START: S_MD -> mode={}", HRI_Mode);
+                        spdlog::info("PHASE {}: S_MD -> mode={}", (int)currentPhase, HRI_Mode);
                         if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
 
                     } else if (cu.rfind("S_CT",0)==0 && !a.empty()) {
                         Ctrl_Mode = (int)std::round(a[0]);
                         CtrlMode_ = (Ctrl_Mode == 2) ? V2_VEL : V1_POS;
-                        spdlog::info("WAIT_START: S_CT -> mode={}", Ctrl_Mode);
+                        spdlog::info("PHASE {}: S_CT -> mode={}", (int)currentPhase, Ctrl_Mode);
                         if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
 
                     } else {
@@ -305,7 +305,7 @@ void M2ProbMoveState::duringCode() {
                     }
                 } else {
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
-                    spdlog::warn("PARAM LOCKED: '{}' rejected (phase={}, only WAIT_START allowed)", cu, (int)currentPhase);
+                    spdlog::warn("PARAM LOCKED: '{}' rejected (phase={}, only WAIT_START/TO_A allowed)", cu, (int)currentPhase);
                 }
                 machine->UIserver->clearCmd();
                 continue;
@@ -410,7 +410,7 @@ void M2ProbMoveState::duringCode() {
                 applyForce(VM2::Zero());
             }
 
-            if (pendingStart && atA_hold) {
+            if (pendingStart) {
 
                 pendingStart  = false;
                 initTrial     = true;
@@ -418,14 +418,8 @@ void M2ProbMoveState::duringCode() {
                 currentPhase  = TRIAL;
 
                 if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                spdlog::info("WAIT_START: pendingStart consumed -> TRIAL (atA_hold=1)");
+                spdlog::info("WAIT_START: pendingStart consumed -> TRIAL");
                 break; 
-
-            } else if (pendingStart && !atA_hold) {
-                // Wait until manual set to AT_A or auto-detected atA_hold to transition to TRIAL
-                if (iterations() % 1000 == 1) {
-                    spdlog::info("WAIT_START: pendingStart consumed but atA_hold=0");
-                } 
             }
             break;
         }
