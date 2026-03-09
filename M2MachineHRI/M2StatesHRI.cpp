@@ -190,9 +190,10 @@ void M2ProbMoveState::duringCode() {
 
             
             if (cu.rfind("TRBG", 0) == 0) {
-                if (currentPhase == TRIAL) {
+                // TRBG only accepted in WAIT_START phase to prevent pending state confusion
+                if (currentPhase != WAIT_START) {
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
-                    spdlog::warn("TRBG rejected: phase={} (TRIAL rejects TRBG)", (int)currentPhase);
+                    spdlog::warn("TRBG rejected: phase={} (only WAIT_START accepts TRBG)", (int)currentPhase);
                     machine->UIserver->clearCmd();
                     continue;
                 }
@@ -210,7 +211,7 @@ void M2ProbMoveState::duringCode() {
                 pendingStart = true;
                 lastStartTime = now;
                 machine->UIserver->clearCmd();
-                spdlog::info("GLOBAL: START captured by '{}' (pendingStart=true, phase={}, t={:.3f})", cu, (int)currentPhase, now);
+                spdlog::info("WAIT_START: TRBG captured (pendingStart=true, t={:.3f})", now);
                 continue;
             }
 
