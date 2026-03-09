@@ -176,7 +176,9 @@ class M2ProbMoveState : public M2TimedState {
         // Disturbance state from Unity (DSTR 0/1). In pHRI we use native M2 disturbance force.
         bool disturbanceActive_ = false;
         double disturbanceForceX_ = -18.0;
-
+        // Safety fallback: auto-clear disturbance if DSTR=0 is missed.
+        double disturbanceAutoOffSec_ = 0.40; // based on Unity setup: T=L_zone/v_forward = 2 x 10 / 50 = 0.4 s
+        double disturbanceExpireAt_ = -1.0;
         // Global Y-lock (enabled after TO_A is completed)
         bool yLockEnabled_ = false;
         double yLockK_ = 1200.0;

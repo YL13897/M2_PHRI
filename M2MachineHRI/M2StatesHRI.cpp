@@ -157,9 +157,10 @@ void M2ProbMoveState::entryCode() {
     initTrial = true; // will trigger TRIAL entry code on first loop
     pendingStart  = false; // no start pending at entry
     rwstAckPending_ = false;
-    softWallEnabled = false; 
+    softWallEnabled = false;
     unityForceCmd_ = VM2::Zero();
     disturbanceActive_ = false;
+    disturbanceExpireAt_ = -1.0;
     yLockEnabled_ = false; // Lock Y movement after reaching A, to encourage strategic planning in X direction
     waitLatchEnabled_ = false;
     trialIndex_ = 0;
@@ -280,12 +281,16 @@ void M2ProbMoveState::duringCode() {
 
             // Disturbance active flag from Unity: DSTR [0/1]
             if (cu.rfind("DSTR", 0) == 0) {
-                disturbanceActive_ = (!a.empty() && a[0] > 0.5); //  0.5 threshold for boolean flag 
+                disturbanceActive_ = (!a.empty() && a[0] > 0.5); //  0.5 threshold for boolean flag
+                if (disturbanceActive_) {
+                    disturbanceExpireAt_ = running() + disturbanceAutoOffSec_;
+                } else {
+                    disturbanceExpireAt_ = -1.0;
+                }
                 if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
                 machine->UIserver->clearCmd();
                 continue;
             }
-            
             // Handle mode setting commands (S_MD, S_CT) in WAIT_START/TO_A
             if (cu.rfind("S_MD",0)==0 || cu.rfind("S_CT",0)==0) {
                 if (currentPhase == WAIT_START || currentPhase == TO_A) {
@@ -327,9 +332,14 @@ void M2ProbMoveState::duringCode() {
             machine->UIserver->clearCmd();
         }
     }
-
-
     // === END GLOBAL COMMAND DRAIN ===
+    // Safety fallback: if DSTR=0 is dropped, force auto-off after a fixed window.
+    if (disturbanceActive_ && disturbanceExpireAt_ >= 0.0 && running() >= disturbanceExpireAt_) {
+        disturbanceActive_ = false;
+        disturbanceExpireAt_ = -1.0;
+        spdlog::warn("Disturbance auto-off triggered after {:.3f}s fallback window", disturbanceAutoOffSec_);
+    }
+
     // Phase controller: TO_A -> WAIT_START -> TRIAL
     switch (currentPhase) {
         
