@@ -119,6 +119,7 @@ void M2CalibState::exitCode() {
 
 // Enter standby: torque control mode with zero commanded force
 void M2StandbyState::entryCode() {
+    spdlog::warn("Entering Standby!");
     robot->initTorqueControl();
 }
 

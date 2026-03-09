@@ -29,29 +29,40 @@ static bool endCalib(StateMachine& sm) {
 static bool toProbOnBtn(StateMachine& SM){
     auto& sm = static_cast<M2MachineHRI&>(SM);
 
-    if (sm.UIserver && sm.UIserver->isCmd()) {
-        std::string cmd; std::vector<double> v;
-        sm.UIserver->getCmd(cmd, v);
+    if (sm.UIserver) {
+        int guard = 64;
+        while (guard-- > 0 && sm.UIserver->isCmd()) {
+            std::string cmd; std::vector<double> v;
+            sm.UIserver->getCmd(cmd, v);
 
-        auto trim = [](std::string s){
-            auto notspace = [](int ch){ return !std::isspace(ch); };
-            s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
-            s.erase(std::find_if(s.rbegin(), s.rend(), notspace).base(), s.end());
-            return s;
-        };
-        std::string cu = trim(cmd);
-        std::transform(cu.begin(), cu.end(), cu.begin(), [](unsigned char ch){ return std::toupper(ch); });
+            auto trim = [](std::string s){
+                auto notspace = [](int ch){ return !std::isspace(ch); };
+                s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
+                s.erase(std::find_if(s.rbegin(), s.rend(), notspace).base(), s.end());
+                return s;
+            };
+            std::string cu = trim(cmd);
+            std::transform(cu.begin(), cu.end(), cu.begin(), [](unsigned char ch){ return std::toupper(ch); });
 
-        // If "BGIN" command received, clear it and transition to ProbMove
-        if (cu.rfind("BGIN", 0) == 0) {
-            sm.UIserver->clearCmd();
-            sm.UIserver->sendCmd(std::string("BGOK"));
-            spdlog::info("[TRANS] accepting BGIN -> toProb");
-            return true;
-        }
-        // If unknown command received, clear it and log a warning
-        else {
-            spdlog::warn("Unexpected cmd='{}' (trim='{}') received. Ignoring.", cmd, cu);
+            // If "BGIN" command received, clear it and transition to ProbMove
+            if (cu.rfind("BGIN", 0) == 0) {
+                sm.UIserver->clearCmd();
+                sm.UIserver->sendCmd(std::string("BGOK"));
+                spdlog::info("[TRANS] accepting BGIN -> toProb");
+                return true;
+            }
+
+            // Ignore noisy runtime commands in Standby (not part of Standby protocol).
+            if (cu.rfind("FRC2", 0) == 0 || cu.rfind("DSTR", 0) == 0 ||
+                cu.rfind("TRBG", 0) == 0 || cu.rfind("RWST", 0) == 0 ||
+                cu.rfind("TO_A", 0) == 0 || cu.rfind("S_MD", 0) == 0 ||
+                cu.rfind("S_CT", 0) == 0 || cu.rfind("SESS", 0) == 0) {
+                sm.UIserver->clearCmd();
+                continue;
+            }
+
+            // If unknown command received, clear it and log a warning
+            spdlog::warn("Unexpected cmd='{}' (trim='{}') received in Standby. Ignoring.", cmd, cu);
             sm.UIserver->clearCmd();
         }
     }
