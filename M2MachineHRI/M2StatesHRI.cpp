@@ -302,7 +302,7 @@ void M2ProbMoveState::duringCode() {
 
                     } else if (cu.rfind("S_CT",0)==0 && !a.empty()) {
                         Ctrl_Mode = (int)std::round(a[0]);
-                        CtrlMode_ = (Ctrl_Mode == 1) ? V2_VEL : V1_POS;
+                        CtrlMode_ = (Ctrl_Mode == 1) ? V1_POS : V2_VEL;
                         spdlog::info("PHASE {}: S_CT -> mode={}", (int)currentPhase, Ctrl_Mode);
                         if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
 
