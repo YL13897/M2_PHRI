@@ -2228,6 +2228,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CORC.Demo.M2RoverBridge
   m2: {fileID: 507810787}
   rover: {fileID: 481331125}
+  worldFollower: {fileID: 0}
   roverTransform: {fileID: 481331129}
   roverRigidbody: {fileID: 481331123}
   m2CenterX: 0.32
@@ -2372,8 +2373,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::M2WorldFollower
   m2: {fileID: 507810787}
+  bridge: {fileID: 0}
   marker: {fileID: 481331129}
-  markerRb: {fileID: 0}
+  markerRb: {fileID: 481331123}
   unityXMin: -9
   unityXMax: 9
   m2XMin: 0.16
@@ -2381,6 +2383,7 @@ MonoBehaviour:
   m2CenterX: 0.32
   unityCenterX: 0
   smooth: 0.25
+  biasFollowRate: 10
   affectOnlyX: 1
 --- !u!1 &512920198
 GameObject:
@@ -8203,6 +8206,18 @@ PrefabInstance:
     - target: {fileID: 552903484175506710, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
       propertyPath: m_Name
       value: Section_BGIN
+      objectReference: {fileID: 0}
+    - target: {fileID: 2825291637416032422, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4568923834187536208, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 10
+      objectReference: {fileID: 0}
+    - target: {fileID: 6092899326964875217, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 7088770887197310712, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
       propertyPath: m_LocalPosition.x

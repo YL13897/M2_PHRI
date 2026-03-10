@@ -1,10 +1,12 @@
 // Minimal 3D follower with explicit X mapping for M2 -> Unity rover alignment.
 using UnityEngine;
+using CORC.Demo;
 
 public class M2WorldFollower : MonoBehaviour
 {
     [Header("Refs")]
     public CORC.CORCM2 m2;
+    public M2RoverBridge bridge;
     public Transform marker;
     public Rigidbody markerRb;
 
@@ -21,11 +23,14 @@ public class M2WorldFollower : MonoBehaviour
 
     [Header("Motion")]
     [Range(0f, 1f)] public float smooth = 0.25f;      // same feel as old 2D version
+    [Tooltip("How quickly sync bias follows disturbance-induced offset in HRI mode.")]
+    public float biasFollowRate = 10f;
 
     [Tooltip("Only sync lateral X. Keep forward Z velocity fully controlled by rover logic.")]
     public bool affectOnlyX = true;
 
     private Vector3 lastPos;
+    private float syncXBias = 0f;
 
     void Reset()
     {
@@ -37,6 +42,7 @@ public class M2WorldFollower : MonoBehaviour
     {
         if (marker == null) marker = transform;
         if (markerRb == null && marker != null) markerRb = marker.GetComponent<Rigidbody>();
+        if (bridge == null) bridge = FindFirstObjectByType<M2RoverBridge>();
     }
 
     void FixedUpdate()
@@ -49,18 +55,27 @@ public class M2WorldFollower : MonoBehaviour
 
         float m2X = (float)m2.State["X"][0];
 
-        Vector3 target = BuildTargetPosition(m2X);
+        float nominalX = MapM2XToUnityX(m2X);
+        bool isHriDisturb = IsHriDisturbanceActive();
+        if (isHriDisturb)
+        {
+            float desiredBias = marker.position.x - nominalX;
+            float biasAlpha = Mathf.Clamp01(biasFollowRate * Time.fixedDeltaTime);
+            syncXBias = Mathf.Lerp(syncXBias, desiredBias, biasAlpha);
+        }
+
+        float targetX = nominalX + syncXBias;
+        Vector3 target = BuildTargetPosition(targetX);
         
         ApplySmoothPosition(target);
     }
 
-    // BuildTargetPosition: Map M2 X to Unity X, and construct the target position for the marker.
-    private Vector3 BuildTargetPosition(float m2X)
+    // BuildTargetPosition: construct the target position for the marker from world X target.
+    private Vector3 BuildTargetPosition(float worldX)
     {
         float yWorld = marker.position.y;
-        float xWorld = MapM2XToUnityX(m2X);
 
-        return new Vector3(xWorld, yWorld, marker.position.z);
+        return new Vector3(worldX, yWorld, marker.position.z);
     }
 
     // Center-preserving linear map. By default this does NOT clamp input range.
@@ -73,6 +88,19 @@ public class M2WorldFollower : MonoBehaviour
         // Pure linear scaling around center: m2CenterX -> unityCenterX.
         float slope = (unityXMax - unityXMin) / denom;
         return unityCenterX + (m2Input - m2CenterX) * slope;
+    }
+
+    private bool IsHriDisturbanceActive()
+    {
+        if (bridge == null) return false;
+        if (bridge.unityMode != M2RoverBridge.UnityDriveMode.Mode2_M2) return false;
+        if (bridge.hriModeCode != 1) return false;
+        return ForceField.DisturbanceU > 0.5f;
+    }
+
+    public void ResetBias()
+    {
+        syncXBias = 0f;
     }
 
     // ApplySmoothPosition: Smoothly move the marker towards the target position. The 'smooth' parameter controls the responsiveness.

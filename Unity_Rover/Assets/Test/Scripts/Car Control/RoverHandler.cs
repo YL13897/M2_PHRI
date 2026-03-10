@@ -14,7 +14,9 @@ public class RoverHandler : MonoBehaviour
     [SerializeField]
     bool isPaused = false;
     [SerializeField]
-    bool preserveLateralVelocity = false;
+    bool preserveLateralVelocity = true;
+    [SerializeField]
+    float lateralDamping = 4.5f;
 
     // readonly int logEveryNFrames = 50;
     // public float sideDamping = 0.0f;
@@ -33,13 +35,15 @@ public class RoverHandler : MonoBehaviour
     // Accelerate(): Auto move forward with fixed speed by directly setting velocity.
     public void Accelerate()
     {
-        // if (preserveLateralVelocity)
-        // {
-        //     Vector3 v = rb.linearVelocity;
-        //     v.z = targetForwardSpeed;
-        //     rb.linearVelocity = v;
-        //     return;
-        // }
+        if (preserveLateralVelocity)
+        {
+            Vector3 v = rb.linearVelocity;
+            v.z = targetForwardSpeed;
+            float alpha = Mathf.Clamp01(lateralDamping * Time.fixedDeltaTime);
+            v.x = Mathf.Lerp(v.x, 0f, alpha);
+            rb.linearVelocity = v;
+            return;
+        }
 
         rb.linearVelocity = transform.forward * targetForwardSpeed;
     }

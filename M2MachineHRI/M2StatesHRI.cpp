@@ -156,6 +156,8 @@ void M2ProbMoveState::entryCode() {
     initToA = true; // will trigger TO_A entry code on first loop
     initTrial = true; // will trigger TRIAL entry code on first loop
     pendingStart  = false; // no start pending at entry
+    // Reset debounce clock on state entry so running()-based delta stays valid.
+    lastStartTime = -1.0;
     rwstAckPending_ = false;
     softWallEnabled = false;
     unityForceCmd_ = VM2::Zero();

@@ -16,6 +16,7 @@ namespace CORC.Demo
         [Header("Refs")]
         public CORC.CORCM2 m2;
         public RoverHandler rover;
+        public M2WorldFollower worldFollower;
         public Transform roverTransform;
         public Rigidbody roverRigidbody;
         public float m2CenterX = 0.32f; // The M2 handle X position that corresponds to the center reference (point A).
@@ -102,6 +103,8 @@ namespace CORC.Demo
                 roverTransform = rover.transform;
             if (rover != null && roverRigidbody == null)
                 roverRigidbody = rover.GetComponent<Rigidbody>();
+            if (worldFollower == null)
+                worldFollower = FindFirstObjectByType<M2WorldFollower>();
 
             if (roverTransform != null)
             {
@@ -141,6 +144,7 @@ namespace CORC.Demo
                 enableKeyboardInMode1 = true;
                 isPaused = false;
                 isDriving = false;
+                worldFollower?.ResetBias();
                 Debug.Log("Switched to Keyboard control mode.");
             }
 
@@ -150,6 +154,7 @@ namespace CORC.Demo
                 trialActive = false;
                 enableKeyboardInMode1 = false;
                 syncRefReady = false;
+                worldFollower?.ResetBias();
                 Debug.Log("Switched to M2 control mode.");
             }
         }
@@ -174,6 +179,7 @@ namespace CORC.Demo
                 trialActive = true;
                 syncRefReady = false; 
                 if (!isPaused) isDriving = true;
+                worldFollower?.ResetBias();
                 if (ScoreManager.Instance != null) ScoreManager.Instance.SetScorePaused(false);
             }
         }
@@ -184,6 +190,7 @@ namespace CORC.Demo
             trialActive = false;
             syncRefReady = false;
             if (unityMode == UnityDriveMode.Mode2_M2 && isDriving) isDriving = false;
+            worldFollower?.ResetBias();
             SendFeedbackForce(0f, 0f);
             if (m2 != null && m2.IsInitialised() && m2.Client != null && m2.Client.IsConnected())
                 m2.SendCmd("DSTR", new double[] { 0.0 });
@@ -359,7 +366,6 @@ namespace CORC.Demo
         {
             if (!trialActive) return;
             if (m2 == null || !m2.IsInitialised() || !m2.Client.IsConnected()) return;
-            if (!SendFeedbackTimer()) return;
             m2.SendCmd("FRC2", new double[] { fx, fy });
         }
 
