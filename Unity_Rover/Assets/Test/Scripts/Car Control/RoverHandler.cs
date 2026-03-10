@@ -13,6 +13,8 @@ public class RoverHandler : MonoBehaviour
     bool isDriving = false;
     [SerializeField]
     bool isPaused = false;
+    [SerializeField]
+    bool preserveLateralVelocity = false;
 
     // readonly int logEveryNFrames = 50;
     // public float sideDamping = 0.0f;
@@ -31,8 +33,15 @@ public class RoverHandler : MonoBehaviour
     // Accelerate(): Auto move forward with fixed speed by directly setting velocity.
     public void Accelerate()
     {
-        rb.linearVelocity = transform.forward * targetForwardSpeed;
+        // if (preserveLateralVelocity)
+        // {
+        //     Vector3 v = rb.linearVelocity;
+        //     v.z = targetForwardSpeed;
+        //     rb.linearVelocity = v;
+        //     return;
+        // }
 
+        rb.linearVelocity = transform.forward * targetForwardSpeed;
     }
 
     // Brake(): Directly set velocity to zero.
@@ -71,6 +80,7 @@ public class RoverHandler : MonoBehaviour
     public void SetInput(Vector2 inputVector) { input = inputVector.normalized; } 
 
     public void SetDriving(bool driving) { isDriving = driving; }
+    public void SetPreserveLateralVelocity(bool preserve) { preserveLateralVelocity = preserve; }
 
     public bool IsDriving() { return isDriving; }
 

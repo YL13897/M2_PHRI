@@ -167,8 +167,8 @@ class M2ProbMoveState : public M2TimedState {
         HRIMode HRIMode_ = V2_PHRI;
         int HRI_Mode = 2;
         enum CtrlMode { V1_POS, V2_VEL };
-        CtrlMode CtrlMode_ = V2_VEL;
-        int Ctrl_Mode = 2;
+        CtrlMode CtrlMode_ = V1_POS;
+        int Ctrl_Mode = 1;
 
         // Unity feedback force command (updated by FRC2, applied in TRIAL)
         VM2 unityForceCmd_ = VM2::Zero();

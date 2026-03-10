@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using System;
 using UnityEngine;
 // using System;
@@ -7,11 +5,11 @@ using UnityEngine;
 public class ForceField : MonoBehaviour
 {
     public static bool HasPlayerEnteredAnyField { get; private set; } = false;
-    public static bool IsPlayerInAnyActiveField { get; private set; } = false;
     // Unified disturbance source u(t) generated in Unity. Current design uses binary 0/1.
     public static float DisturbanceU { get; private set; } = 0f;
+    // Estimated disturbance duration used by M2 as a safety auto-off timeout.
+    public static float DisturbanceDurationSec { get; private set; } = 0.4f;
     public static event Action OnFirstPlayerEnteredAnyField;
-    private static int activeFieldContactCount = 0;
 
     [SerializeField] ForceFieldPreview forceFieldPreview; 
     
@@ -28,13 +26,12 @@ public class ForceField : MonoBehaviour
     // private set; Only this class can change the value
     public bool IsActiveThisRun { get; private set; } 
     private bool playerInsideThisActiveField = false;
+    private float disturbanceElapsedSec = 0f;
 
     // ResetFirstEntryFlag(): Resets the static flags related to player entry and disturbance.
     public static void ResetFirstEntryFlag()
     {
         HasPlayerEnteredAnyField = false;
-        activeFieldContactCount = 0;
-        IsPlayerInAnyActiveField = false;
         DisturbanceU = 0f;
     }
 
@@ -44,6 +41,7 @@ public class ForceField : MonoBehaviour
         IsActiveThisRun = false;
         targetRb = null;
         playerInsideThisActiveField = false;
+        disturbanceElapsedSec = 0f;
         if (bridge == null)
             bridge = FindFirstObjectByType<CORC.Demo.M2RoverBridge>();
     }
@@ -55,18 +53,16 @@ public class ForceField : MonoBehaviour
         if (playerInsideThisActiveField)
         {
             playerInsideThisActiveField = false;
-            activeFieldContactCount = Mathf.Max(0, activeFieldContactCount - 1);
-            IsPlayerInAnyActiveField = activeFieldContactCount > 0;
-            DisturbanceU = IsPlayerInAnyActiveField ? 1f : 0f;
+            DisturbanceU = 0f;
+            disturbanceElapsedSec = 0f;
         }
     }
 
 
     // ------------------------------------------- Core Logic -----------------------------------
     /* 
-    OnTriggerEnter() ensure if player enters the field and disturbance is active for this run in the field, 
-    add activeFieldContactCount, add when leave the triggered disturbance field, decrease activeFieldContactCount, 
-    and update IsPlayerInAnyActiveField and DisturbanceU accordingly.
+    OnTriggerEnter() ensures that when player enters an active disturbance field, Unity disturbance source u(t) is enabled,
+    and when the player exits, u(t) is disabled.
     */
 
     // OnTriggerEnter(): Detects when the player enters the force field trigger, samples the disturbance state based on the defined probability, 
@@ -95,9 +91,8 @@ public class ForceField : MonoBehaviour
         if (!playerInsideThisActiveField)
         {
             playerInsideThisActiveField = true;
-            activeFieldContactCount++; // Increment the count of active fields the player is currently inside.
-            IsPlayerInAnyActiveField = activeFieldContactCount > 0;
-            DisturbanceU = IsPlayerInAnyActiveField ? 1f : 0f;
+            disturbanceElapsedSec = 0f;
+            DisturbanceU = 1f;
         }
     }
 
@@ -109,17 +104,31 @@ public class ForceField : MonoBehaviour
         if (playerInsideThisActiveField)
         {
             playerInsideThisActiveField = false;
-            activeFieldContactCount = Mathf.Max(0, activeFieldContactCount - 1); // Decrement the count of active fields the player is leaving.
-            IsPlayerInAnyActiveField = activeFieldContactCount > 0;
-            DisturbanceU = IsPlayerInAnyActiveField ? 1f : 0f;
+            DisturbanceU = 0f;
+            disturbanceElapsedSec = 0f;
         }
     }
 
     void FixedUpdate()
     {
+        if (playerInsideThisActiveField && targetRb == null)
+        {
+            playerInsideThisActiveField = false;
+            DisturbanceU = 0f;
+            disturbanceElapsedSec = 0f;
+        }
+
         if (!IsActiveThisRun) return;
         if (targetRb == null) return;
         if (DisturbanceU <= 0f) return;
+
+        // Safe guard: If disturbance duration is exceeded, automatically turn off the disturbance.
+        disturbanceElapsedSec += Time.fixedDeltaTime;
+        if (disturbanceElapsedSec >= DisturbanceDurationSec)
+        {
+            DisturbanceU = 0f;
+            return;
+        }
 
         // In M2 pHRI mode, disturbance force is generated on M2 side; skip Unity force to avoid double disturbance.
         if (bridge != null
@@ -127,7 +136,9 @@ public class ForceField : MonoBehaviour
             && bridge.hriModeCode == 2) return;
 
         Vector3 dir = fixedDirection.normalized;
+        
         targetRb.AddForce(dir * (forceMagnitude * DisturbanceU), ForceMode.Force);
         // targetRb.MovePosition(targetRb.position + dir * speed * Time.fixedDeltaTime);
     }
+
 }

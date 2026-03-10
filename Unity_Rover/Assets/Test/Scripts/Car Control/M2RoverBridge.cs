@@ -18,6 +18,7 @@ namespace CORC.Demo
         public RoverHandler rover;
         public Transform roverTransform;
         public Rigidbody roverRigidbody;
+        public float m2CenterX = 0.32f; // The M2 handle X position that corresponds to the center reference (point A).
 
         public enum UnityDriveMode
         {
@@ -58,7 +59,7 @@ namespace CORC.Demo
         // POS paradigm switch:
         // true  -> Paradigm 1: rover tracks mapped handle position (virtual spring-damper behavior)
         // false -> Paradigm 2: handle offset directly maps to steering
-        public bool enablePosSyncCorrection = true;
+        public bool enablePosSyncCorrection = false;
         public float sendRateHz = 40.0f;
         public float posCorrKp = 0.05f; // Proportional gain for POS-mode sync correction based on rover X error
         public float posCorrKd = 0.04f;// Derivative gain for POS-mode sync correction based on rover Vx
@@ -76,7 +77,7 @@ namespace CORC.Demo
         private bool lastM2Connected = false; // Track M2 connection status to detect reconnects for auto-snapping
         private bool hasSentDisturbanceState = false; // To track whether we've sent the disturbance state to M2, to avoid redundant commands
         private bool lastDisturbanceState = false; // To track the last disturbance state sent to M2, for change detection
-        private float velSteerState = 0f; // State variable for velocity control mode steering, representing the current steer command that evolves based on handle input
+        private float lastDisturbanceDurationSec = 0f; // Last timeout value sent with DSTR=1.
         private Vector3 roverInitialPosition; // To store the initial pose of the rover for resetting, captured in Awake()
         
         // Flag indicating whether the reference point has been initialized.
@@ -95,6 +96,8 @@ namespace CORC.Demo
 
         void Awake()
         {
+            if (rover == null)
+                rover = FindFirstObjectByType<RoverHandler>();
             if (rover != null && roverTransform == null)
                 roverTransform = rover.transform;
             if (rover != null && roverRigidbody == null)
@@ -136,7 +139,9 @@ namespace CORC.Demo
             {   
                 trialActive = false;
                 enableKeyboardInMode1 = true;
-                velSteerState = 0f;
+                isPaused = false;
+                isDriving = false;
+                Debug.Log("Switched to Keyboard control mode.");
             }
 
             // M2 control mode enabled, reset states to prepare for M2 control.
@@ -145,17 +150,20 @@ namespace CORC.Demo
                 trialActive = false;
                 enableKeyboardInMode1 = false;
                 syncRefReady = false;
-                velSteerState = 0f;
+                Debug.Log("Switched to M2 control mode.");
             }
         }
 
         // Apply the HRI and control modes received from M2. 
         public void ApplyM2Modes(int hriMode, int ctrlMode)
         {
+            bool ctrlChanged = ctrlModeCode != ctrlMode;
             hriModeCode = hriMode;
             ctrlModeCode = ctrlMode;
-            // syncRefReady = false;
-            // velSteerState = 0f;
+            if (ctrlChanged)
+            {
+                syncRefReady = false;
+            }
         }
 
         // This should be called when M2 sends the BGIN command, indicating the trial starts
@@ -166,6 +174,7 @@ namespace CORC.Demo
                 trialActive = true;
                 syncRefReady = false; 
                 if (!isPaused) isDriving = true;
+                if (ScoreManager.Instance != null) ScoreManager.Instance.SetScorePaused(false);
             }
         }
 
@@ -174,9 +183,14 @@ namespace CORC.Demo
         {
             trialActive = false;
             syncRefReady = false;
-            if (isDriving) isDriving = false;
-            velSteerState = 0f;
+            if (unityMode == UnityDriveMode.Mode2_M2 && isDriving) isDriving = false;
             SendFeedbackForce(0f, 0f);
+            if (m2 != null && m2.IsInitialised() && m2.Client != null && m2.Client.IsConnected())
+                m2.SendCmd("DSTR", new double[] { 0.0 });
+            hasSentDisturbanceState = false;
+            lastDisturbanceState = false;
+            lastDisturbanceDurationSec = 0f;
+            if (ScoreManager.Instance != null) ScoreManager.Instance.SetScorePaused(true);
         }
 
         // Reset the rover to its initial pose, and clear velocities. This can be called on trial start or when needed.
@@ -194,7 +208,47 @@ namespace CORC.Demo
             }
 
             syncRefReady = false;
-            velSteerState = 0f;
+        }
+
+        // Reset Unity-side runtime state without reloading scene or disconnecting M2.
+        public void SoftResetUnityStateKeepM2Connection()
+        {
+            trialActive = false;
+            syncRefReady = false;
+            hasSentDisturbanceState = false;
+            lastDisturbanceState = false;
+            lastDisturbanceDurationSec = 0f;
+            isPaused = false;
+            isDriving = false;
+
+            ResetRoverToInitialPose();
+            ApplyRoverSteer(0f);
+            SendFeedbackForce(0f, 0f);
+
+            if (ScoreManager.Instance != null)
+            {
+                ScoreManager.Instance.ResetAll();
+                ScoreManager.Instance.SetScorePaused(true);
+            }
+
+            ForceField.ResetFirstEntryFlag();
+
+            if (GlobalRandomSeed.IsInitialized)
+                UnityEngine.Random.InitState(GlobalRandomSeed.Seed);
+
+            var road = FindFirstObjectByType<EndlessRoad>();
+            if (road != null)
+                road.ResetRoadAroundPlayer();
+
+            var fields = FindObjectsByType<ForceField>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            foreach (var f in fields)
+            {
+                if (f == null) continue;
+                var go = f.gameObject;
+                if (!go.activeSelf) continue;
+                go.SetActive(false);
+                go.SetActive(true);
+            }
         }
 
 
@@ -303,20 +357,28 @@ namespace CORC.Demo
         // Send the computed feedback force to M2 using the FRC2 command.
         private void SendFeedbackForce(float fx, float fy)
         {
+            if (!trialActive) return;
             if (m2 == null || !m2.IsInitialised() || !m2.Client.IsConnected()) return;
+            if (!SendFeedbackTimer()) return;
             m2.SendCmd("FRC2", new double[] { fx, fy });
         }
 
         private void TrySendDisturbanceStateToM2()
         {
+            if (!trialActive) return;
             if (m2 == null || !m2.IsInitialised() || m2.Client == null || !m2.Client.IsConnected()) return;
 
             // Use the same Unity disturbance source u(t) for both local simulation and M2 signaling.
             bool state = ForceField.DisturbanceU > 0.5f;
-            if (!hasSentDisturbanceState || state != lastDisturbanceState)
+            float durationSec = Mathf.Max(0f, ForceField.DisturbanceDurationSec);
+            bool durationChanged = state && lastDisturbanceState && Mathf.Abs(durationSec - lastDisturbanceDurationSec) > 0.05f;
+
+            if (!hasSentDisturbanceState || state != lastDisturbanceState || durationChanged)
             {
-                m2.SendCmd("DSTR", new double[] { state ? 1.0 : 0.0 });
+                if (state) m2.SendCmd("DSTR", new double[] { 1.0, durationSec });
+                else m2.SendCmd("DSTR", new double[] { 0.0 });
                 lastDisturbanceState = state;
+                lastDisturbanceDurationSec = state ? durationSec : 0f;
                 hasSentDisturbanceState = true;
             }
         }
@@ -334,6 +396,7 @@ namespace CORC.Demo
         // If can't get valid handle X input from M2, send zero feedback to prevent unintended behavior.
         private void SendZeroFeedbackAtSendRate()
         {
+            if (!trialActive) return;
             if (SendFeedbackTimer()) SendFeedbackForce(0f, 0f);
         }
 
@@ -342,18 +405,20 @@ namespace CORC.Demo
 
         private float ComputeVelHandleXRel(float handleX)
         {
-            float handleXRel = handleX - handleXRef;
+            float handleXRel = handleX - m2CenterX;
             if (Mathf.Abs(handleXRel) < velHandleXDeadZone) handleXRel = 0f;
             return handleXRel;
         }
 
-        // Intergrate handle X input to update the steering state in VEL mode, where handle offset controls steering acceleration.
+        // VEL mode: handle offset sets target lateral speed, steering closes the vx error.
         private float ComputeVelSteerFromAcceleration(float handleXRel)
         {
-            // VEL mode: handle offset controls steering acceleration.
-            velSteerState += handleXRel * velHandleXToSteer * Time.fixedDeltaTime;
-            velSteerState = Mathf.Clamp(velSteerState, -steerClamp, steerClamp);
-            return velSteerState;
+            float targetVx = handleXRel * velHandleXToTargetVx;
+            float currentVx = roverRigidbody != null ? roverRigidbody.linearVelocity.x : 0f;
+            float vxError = targetVx - currentVx;
+            float steer = vxError * velHandleXToSteer;
+            steer = Mathf.Clamp(steer, -steerClamp, steerClamp);
+            return steer;
         }
 
 
@@ -405,6 +470,13 @@ namespace CORC.Demo
 
         void Update()
         {
+            if (rover == null)
+                rover = FindFirstObjectByType<RoverHandler>();
+            if (rover != null && roverTransform == null)
+                roverTransform = rover.transform;
+            if (rover != null && roverRigidbody == null)
+                roverRigidbody = rover.GetComponent<Rigidbody>();
+
             bool connectedNow = m2 != null && m2.IsInitialised() && m2.Client != null && m2.Client.IsConnected();
 
             // Detect M2 reconnect to trigger auto-sync if enabled, to prevent large position mismatches that can cause jump forces.
@@ -412,38 +484,54 @@ namespace CORC.Demo
             {
                 SyncRoverToCurrentM2MappedX();
                 hasSentDisturbanceState = false;
+                lastDisturbanceDurationSec = 0f;
             }
-            if (!connectedNow) hasSentDisturbanceState = false;
+            if (!connectedNow)
+            {
+                hasSentDisturbanceState = false;
+                lastDisturbanceDurationSec = 0f;
+            }
             lastM2Connected = connectedNow;
 
-            if (unityMode == UnityDriveMode.Mode2_M2)
+            if (unityMode == UnityDriveMode.Mode2_M2 && trialActive)
                 TrySendDisturbanceStateToM2();
 
             if (enableHotkeys)
             {
+                
                 bool ctrl = Input.GetKey(KeyCode.LeftControl);
                 if (Input.GetKeyDown(KeyCode.T) && !ctrl)
                 {
+                    Debug.LogWarning("Hotkey T detected");
                     isPaused = false;
                     isDriving = true;
-                    if (ScoreManager.Instance != null) ScoreManager.Instance.SetScorePaused(false);
+                    // if (ScoreManager.Instance != null) ScoreManager.Instance.SetScorePaused(!trialActive);
                 }
                 if (Input.GetKeyDown(KeyCode.T) && ctrl)
                 {
                     isPaused = true;
                     isDriving = false;
-                    if (ScoreManager.Instance != null) ScoreManager.Instance.SetScorePaused(true);
+                    // if (ScoreManager.Instance != null) ScoreManager.Instance.SetScorePaused(true);
                 }
 
                 if (Input.GetKeyDown(KeyCode.R) && ctrl )
-                    SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+                {
+                    // if (unityMode == UnityDriveMode.Mode2_M2)
+                    //     SoftResetUnityStateKeepM2Connection();
+                    // else
+                        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+                }
             }
 
             if (rover != null)
             {
+                rover.SetPreserveLateralVelocity(unityMode == UnityDriveMode.Mode2_M2);
                 rover.SetPaused(isPaused);
                 rover.SetDriving(isDriving && !isPaused);
             }
+
+            if (ScoreManager.Instance != null)
+                ScoreManager.Instance.SetScorePaused(isPaused || (unityMode == UnityDriveMode.Mode2_M2 && !trialActive));
 
         }    
 
@@ -461,7 +549,6 @@ namespace CORC.Demo
              // Can't get handle X, can't proceed with M2 control
             else if (!TryGetM2HandleX(out float handleX))
             {
-               
                 SendZeroFeedbackAtSendRate();
                 return;
             }
@@ -469,7 +556,6 @@ namespace CORC.Demo
             // M2 control mode but trial not active, ensure rover is not moving and send zero feedback.
             else if (!trialActive)
             {
-                velSteerState = 0f;
                 SendZeroFeedbackAtSendRate();
                 ApplyRoverSteer(0f);
                 return;
@@ -483,7 +569,6 @@ namespace CORC.Demo
 
                 if (ctrl == 1) // POS mode
                 {
-                    velSteerState = 0f;
                     if (hri == 2) PosPhriMode(handleX);// pHRI + POS mode
                     else PosHriMode(handleX); // HRI-only + POS mode
                     return;
@@ -497,7 +582,6 @@ namespace CORC.Demo
                     return;
                 }
 
-                velSteerState = 0f;
                 SendFeedbackForce(0f, 0f);
             }
         }
@@ -505,4 +589,3 @@ namespace CORC.Demo
 
     }
 }
-

@@ -293,7 +293,7 @@ void M2ProbMoveState::duringCode() {
             }
             // Handle mode setting commands (S_MD, S_CT) in WAIT_START/TO_A
             if (cu.rfind("S_MD",0)==0 || cu.rfind("S_CT",0)==0) {
-                if (currentPhase == WAIT_START || currentPhase == TO_A) {
+                if (currentPhase != TRIAL) {
                     if (cu.rfind("S_MD",0)==0 && !a.empty()) {
                         HRI_Mode = (int)std::round(a[0]);
                         HRIMode_ = (HRI_Mode == 2) ? V2_PHRI : V1_HRI;
@@ -302,7 +302,7 @@ void M2ProbMoveState::duringCode() {
 
                     } else if (cu.rfind("S_CT",0)==0 && !a.empty()) {
                         Ctrl_Mode = (int)std::round(a[0]);
-                        CtrlMode_ = (Ctrl_Mode == 2) ? V2_VEL : V1_POS;
+                        CtrlMode_ = (Ctrl_Mode == 1) ? V2_VEL : V1_POS;
                         spdlog::info("PHASE {}: S_CT -> mode={}", (int)currentPhase, Ctrl_Mode);
                         if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
 

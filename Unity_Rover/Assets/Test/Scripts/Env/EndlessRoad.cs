@@ -45,21 +45,35 @@ public class EndlessRoad : MonoBehaviour
         }
 
 
-        // Add the first sections to the road
-        for(int i = 0; i < sections.Length; i++)
-        {
-            // Get a random section
-            GameObject randomSection = GetRandomSectionFromPool();
-
-            // Move it into position and set it to active
-            randomSection.transform.position = new Vector3(sectionsPool[i].transform.position.x, 0, i * sectionLength + sectionLength);
-            randomSection.SetActive(true);
-
-            // Set the section in the array
-            sections[i] = randomSection;
-        }
+        ResetRoadAroundPlayer();
 
         StartCoroutine(UpdateLessOftenCO());
+    }
+
+    // Rebuild visible road sections around current player position.
+    public void ResetRoadAroundPlayer()
+    {
+        if (playerCarTransform == null)
+        {
+            var p = GameObject.FindGameObjectWithTag("Player");
+            if (p == null) return;
+            playerCarTransform = p.transform;
+        }
+
+        for (int i = 0; i < sectionsPool.Length; i++)
+        {
+            if (sectionsPool[i] != null)
+                sectionsPool[i].SetActive(false);
+        }
+
+        float baseZ = playerCarTransform.position.z;
+        for (int i = 0; i < sections.Length; i++)
+        {
+            GameObject randomSection = GetRandomSectionFromPool();
+            randomSection.transform.position = new Vector3(randomSection.transform.position.x, 0, baseZ + (i + 1) * sectionLength);
+            randomSection.SetActive(true);
+            sections[i] = randomSection;
+        }
     }
 
     IEnumerator UpdateLessOftenCO()
