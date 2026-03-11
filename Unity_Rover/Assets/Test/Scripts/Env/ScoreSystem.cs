@@ -1,43 +1,27 @@
-// 
-
 using UnityEngine;
 
-
 public class ScoreSystem : MonoBehaviour
-{  
+{
     [Header("Player")]
-    [SerializeField] Rigidbody targetRb; // optional manual assignment
-   
+    [SerializeField] Rigidbody targetRb;
 
     [Header("Centerline reference")]
     public float centerX = 0f;
 
-    // [Header("Spring parameters")]
-    // public float springK = 2e3f;   // stiffness (N/m)
-    // public float damperC = 5e2f;    // damping (N*s/m)
-
-    [Header("Limits (optional)")]
-    public float maxForce = 2000f; // clamp to avoid crazy forces
-
     [Header("Scoring Parameters")]
-    public float deviationScoreRate = 1.0f;   // score per meter per second (abs(e)*dt)
-    public float forceIntegralWeight = 0.00001f; // score per (N*s) (abs(fx)*dt)
+    public float deviationScoreRate = 1.0f; // score per meter per second (abs(e)*dt)
     public float penaltyValue = 500f;
-    [Header("Boundary Clamp Control")]
-    public bool clampDisabled = true;
-    public bool enableBoundaryClamp = true;
+
+    [Header("Global Boundary")]
     public float minX = -9.0f;
     public float maxX = 9.0f;
+    public bool enableBoundaryClamp = true;
 
     [Header("Penalty Control")]
-    public float penaltyCooldown = 1.0f;   // seconds between penalty triggers
-    private float lastPenaltyTime = -999f;
-    private bool clampEnabledByFirstField = false;
-
+    public float penaltyCooldown = 1.0f; // seconds between penalties while touching boundary
 
     void Awake()
     {
-        // Auto-find Player if not assigned
         if (targetRb == null)
         {
             GameObject player = GameObject.FindGameObjectWithTag("Player");
@@ -45,106 +29,64 @@ public class ScoreSystem : MonoBehaviour
         }
 
         if (targetRb == null)
-        {
             Debug.LogError("[ScoreSystem] No target Rigidbody assigned or found with tag 'Player'.");
-        }
-
-        if (clampDisabled)
-        {
-            enableBoundaryClamp = false;
-            clampEnabledByFirstField = false;
-            ForceField.ResetFirstEntryFlag();
-        }
     }
 
-    void OnEnable()
-    {
-        ForceField.OnFirstPlayerEnteredAnyField += EnableClampFromFirstField;
-    }
-
-    void OnDisable()
-    {
-        ForceField.OnFirstPlayerEnteredAnyField -= EnableClampFromFirstField;
-    }
-
-    private void EnableClampFromFirstField()
-    {
-        if (!clampDisabled || clampEnabledByFirstField) return;
-
-        enableBoundaryClamp = true;
-        clampEnabledByFirstField = true;
-        // Debug.Log("[ScoreSystem] Boundary clamp enabled by first ForceField entry.");
-    }
-
-    
     void FixedUpdate()
     {
         if (targetRb == null) return;
         if (ScoreManager.Instance == null) return;
 
+        // If the score is currently paused, prevent player movement and skip scoring.
         if (ScoreManager.Instance.IsScorePaused)
         {
             targetRb.linearVelocity = Vector3.zero;
             return;
         }
 
+        // Update the boundary UI with the player's current position and the defined boundaries.
         ScoreManager.Instance.UpdateBoundaryUI(targetRb.position.x, minX, maxX);
-        
-        bool penaltyFlag = ClampPosition();
 
-        // signed lateral error (positive if to the right of center)
-        float e = targetRb.position.x - centerX;
-
-        // lateral velocity (x direction)
-        float eDot = targetRb.linearVelocity.x;
-        
-
-        // ---- scoring (integrals via dt) ----
-        float dt = Time.fixedDeltaTime;
-
-        // deviation integral ~ ∫ |e| dt
-        float deviationTerm = deviationScoreRate * Mathf.Abs(e) * dt;
-
-        // float deltaScore = deviationTerm + forceTerm;
-        float deltaScore = deviationTerm;
-
-        if(penaltyFlag)
-        { 
-            // only punish once per cooldown window
-            if (Time.time - lastPenaltyTime >= penaltyCooldown)
-            {
-                ScoreManager.Instance.ApplyBoundaryPenalty(penaltyValue);
-                lastPenaltyTime = Time.time;
-            }
-        }
-        else
+        bool boundaryContact = ClampAndDetectBoundaryContact();
+        if (boundaryContact)
         {
-            ScoreManager.Instance.AddToScores(deltaScore);
+            // If the player is in contact with the boundary, apply a penalty to the score and skip further scoring for this frame.
+            ScoreManager.Instance.TryApplyBoundaryPenalty(penaltyValue, penaltyCooldown);
+            return;
         }
 
+        float e = targetRb.position.x - centerX;
+        float deltaScore = deviationScoreRate * Mathf.Abs(e) * Time.fixedDeltaTime;
+        ScoreManager.Instance.AddToScores(deltaScore);
     }
 
-
-
-    bool ClampPosition()
+    bool ClampAndDetectBoundaryContact()
     {
         if (!enableBoundaryClamp) return false;
 
         Vector3 pos = targetRb.position;
+        Vector3 vel = targetRb.linearVelocity;
+        bool hitBoundary = false;
 
-        if (pos.x < minX)
+        if (pos.x <= minX)
         {
             pos.x = minX;
-            targetRb.position = pos;
-            return true;
+            if (vel.x < 0f) vel.x = 0f;
+            hitBoundary = true;
         }
-        if (pos.x > maxX)
+        else if (pos.x >= maxX)
         {
             pos.x = maxX;
-            targetRb.position = pos;
-            return true;
+            if (vel.x > 0f) vel.x = 0f;
+            hitBoundary = true;
         }
-        return false;
-    }
 
+        if (hitBoundary)
+        {
+            targetRb.position = pos;
+            targetRb.linearVelocity = vel;
+        }
+
+        return hitBoundary;
+    }
 }

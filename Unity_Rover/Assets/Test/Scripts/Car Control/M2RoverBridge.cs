@@ -36,13 +36,22 @@ namespace CORC.Demo
         public int ctrlModeCode = 1;
 
         [Header("POS mode (handle offset -> steer)")]
-        float handleXDeadZone = 0.003f;
+        float handleXDeadZone = 0.005f;
         public float handleXToSteer = 5.0f; // steering command per meter of handle offset in POS mode
 
-        [Header("M2 VEL mode (handle offset -> steer)")]
-        public float velHandleXDeadZone = 0.003f;
-        public float velHandleXToSteer = 5.0f; // steering command per meter of handle offset in VEL mode
-        public float velHandleXToTargetVx = 5.0f; // target rover Vx (m/s) per meter of handle offset
+        [Header("M2 VEL mode (open-loop damped steer)")]
+        public float velHandleXDeadZone = 0.01f;
+        public float velOpenLoopKp = 25.0f; // steer response to handle offset
+        public float velOpenLoopKd = 2.5f; // damping term from current lateral velocity
+        public float velSteerClamp = 0.30f; // VEL-only steering clamp to avoid saturation oscillation
+        public bool velDebugWarning = true;
+        public float velDebugHz = 10.0f;
+
+        [Header("M2 VEL runtime override")]
+        public bool forceVelRuntimeParams = true; // prevent scene/inspector stale values in M2+VEL
+        public float forcedVelOpenLoopKp = 25.0f;
+        public float forcedVelOpenLoopKd = 2.5f;
+        public float forcedVelSteerClamp = 0.30f;
 
         [Header("Shared steering limits")]
         public float steerClamp = 1.0f;
@@ -57,16 +66,9 @@ namespace CORC.Demo
         public float unityCenterX = 0.0f; // Unity X coordinate that corresponds to M2 handle point A (the center reference).
         public bool autoSnapOnM2Reconnect = true; // Whether to automatically snap rover to M2-mapped position when M2 reconnects, to prevent jump forces due to position mismatch.
 
-        // POS paradigm switch:
-        // true  -> Paradigm 1: rover tracks mapped handle position (virtual spring-damper behavior)
-        // false -> Paradigm 2: handle offset directly maps to steering
-        public bool enablePosSyncCorrection = false;
-        public float sendRateHz = 40.0f;
-        public float posCorrKp = 0.05f; // Proportional gain for POS-mode sync correction based on rover X error
-        public float posCorrKd = 0.04f;// Derivative gain for POS-mode sync correction based on rover Vx
-
+        public float sendRateHz = 25.0f; // Rate limit for sending feedback commands to M2 (Hz)
+        
         bool enableKeyboardInMode1 = true;
-
 
         // (1) isPaused=true: completely frozen; 
         // (2) isPaused=false, isDriving=true: normal driving; 
@@ -75,10 +77,10 @@ namespace CORC.Demo
         private bool isPaused = false;
 
         private float nextFeedbackSendTime = 0.0f;
+        private float nextVelDebugTime = 0.0f;
         private bool lastM2Connected = false; // Track M2 connection status to detect reconnects for auto-snapping
         private bool hasSentDisturbanceState = false; // To track whether we've sent the disturbance state to M2, to avoid redundant commands
         private bool lastDisturbanceState = false; // To track the last disturbance state sent to M2, for change detection
-        private float lastDisturbanceDurationSec = 0f; // Last timeout value sent with DSTR=1.
         private Vector3 roverInitialPosition; // To store the initial pose of the rover for resetting, captured in Awake()
         
         // Flag indicating whether the reference point has been initialized.
@@ -165,10 +167,7 @@ namespace CORC.Demo
             bool ctrlChanged = ctrlModeCode != ctrlMode;
             hriModeCode = hriMode;
             ctrlModeCode = ctrlMode;
-            if (ctrlChanged)
-            {
-                syncRefReady = false;
-            }
+            if (ctrlChanged) syncRefReady = false;
         }
 
         // This should be called when M2 sends the BGIN command, indicating the trial starts
@@ -191,12 +190,11 @@ namespace CORC.Demo
             syncRefReady = false;
             if (unityMode == UnityDriveMode.Mode2_M2 && isDriving) isDriving = false;
             worldFollower?.ResetBias();
-            SendFeedbackForce(0f, 0f);
+            // SendFeedbackForce(0f, 0f);
             if (m2 != null && m2.IsInitialised() && m2.Client != null && m2.Client.IsConnected())
-                m2.SendCmd("DSTR", new double[] { 0.0 });
+                m2.SendCmd("DSTR", new double[] { 0.0 }); // Ensure disturbance is turned off at trial end
             hasSentDisturbanceState = false;
             lastDisturbanceState = false;
-            lastDisturbanceDurationSec = 0f;
             if (ScoreManager.Instance != null) ScoreManager.Instance.SetScorePaused(true);
         }
 
@@ -224,13 +222,12 @@ namespace CORC.Demo
             syncRefReady = false;
             hasSentDisturbanceState = false;
             lastDisturbanceState = false;
-            lastDisturbanceDurationSec = 0f;
             isPaused = false;
             isDriving = false;
 
             ResetRoverToInitialPose();
             ApplyRoverSteer(0f);
-            SendFeedbackForce(0f, 0f);
+            // SendFeedbackForce(0f, 0f);
 
             if (ScoreManager.Instance != null)
             {
@@ -253,14 +250,25 @@ namespace CORC.Demo
                 if (f == null) continue;
                 var go = f.gameObject;
                 if (!go.activeSelf) continue;
-                go.SetActive(false);
-                go.SetActive(true);
+                go.SetActive(false); 
+                go.SetActive(true); 
             }
         }
 
 
         // =======================================================================================
         // --- Sync logic  ---
+
+        // Safely attempt to read the M2 handle X position from the M2 state.
+        private bool TryGetM2HandleX(out float handleX)
+        {
+            handleX = 0f;
+            if (m2 == null || !m2.IsInitialised() || m2.Client == null || !m2.Client.IsConnected()) return false;
+            if (m2.State == null || m2.State["X"] == null || m2.State["X"].Length < 1) return false;
+            handleX = (float)m2.State["X"][0];
+            if (float.IsNaN(handleX) || float.IsInfinity(handleX)) return false;
+            return true;
+        }
 
         // Re-synchronize rover position to current M2 mapping without recalibrating A reference.
         public bool SyncRoverToCurrentM2MappedX()
@@ -317,27 +325,13 @@ namespace CORC.Demo
         // --- POS control logic ---
 
         // Compute steering for POS mode with two paradigms toggled by usePosSyncCorrection.
-        private float ComputeSteerPosMode(float handleX, bool usePosSyncCorrection)
+        private float ComputeSteerPosMode(float handleX)
         {
             float handleXRel = handleX - handleXRef;
             if (Mathf.Abs(handleXRel) < handleXDeadZone) handleXRel = 0f;
 
             float steer;
-
-            if (usePosSyncCorrection && roverTransform != null)
-            {
-                // Paradigm 1: position tracking controller (virtual spring-damper style)
-                float targetX = ComputeTargetXFromHandle(handleX);
-                float roverX = roverTransform.position.x;
-                float roverVx = roverRigidbody != null ? roverRigidbody.linearVelocity.x : 0f;
-                steer = posCorrKp * (targetX - roverX) - posCorrKd * roverVx;
-            }
-            else
-            {
-                // Paradigm 2: direct mapping from handle offset to steering
-                steer = handleXRel * handleXToSteer;
-            }
-
+            steer = handleXRel * handleXToSteer;
             return Mathf.Clamp(steer, -steerClamp, steerClamp);
         }
 
@@ -350,25 +344,20 @@ namespace CORC.Demo
             float now = Time.time;
             if (now < nextFeedbackSendTime) return false;
 
-            float period = 1.0f / sendRateHz;
-            nextFeedbackSendTime = now + period;
+            nextFeedbackSendTime = now + 1.0f / sendRateHz;
             return true;
         }
 
-        private void SendFeedback()
+        // Send the computed feedback force to M2 using the FRC2 command (No needed currently, just keep it for later testing).
+        private void SendFeedbackForce(float fx, float fy, bool rateLimited = true)
         {
-            if (!SendFeedbackTimer()) return;
-            SendFeedbackForce(0f, 0f);
-        }
-
-        // Send the computed feedback force to M2 using the FRC2 command.
-        private void SendFeedbackForce(float fx, float fy)
-        {
+            if (rateLimited && !SendFeedbackTimer()) return;
             if (!trialActive) return;
-            if (m2 == null || !m2.IsInitialised() || !m2.Client.IsConnected()) return;
-            m2.SendCmd("FRC2", new double[] { fx, fy });
+            if (m2 == null || !m2.IsInitialised() || m2.Client == null || !m2.Client.IsConnected()) return;
+            m2.SendCmd("FRC2", new double[] { fx, fy }); // M2 set all to zeros, no need to send.
         }
 
+        // Overload for sending zero force without parameters.
         private void TrySendDisturbanceStateToM2()
         {
             if (!trialActive) return;
@@ -377,54 +366,63 @@ namespace CORC.Demo
             // Use the same Unity disturbance source u(t) for both local simulation and M2 signaling.
             bool state = ForceField.DisturbanceU > 0.5f;
             float durationSec = Mathf.Max(0f, ForceField.DisturbanceDurationSec);
-            bool durationChanged = state && lastDisturbanceState && Mathf.Abs(durationSec - lastDisturbanceDurationSec) > 0.05f;
 
-            if (!hasSentDisturbanceState || state != lastDisturbanceState || durationChanged)
+            if (!hasSentDisturbanceState || state != lastDisturbanceState)
             {
-                if (state) m2.SendCmd("DSTR", new double[] { 1.0, durationSec });
+                if (state) m2.SendCmd("DSTR", new double[] { 1.0});
                 else m2.SendCmd("DSTR", new double[] { 0.0 });
                 lastDisturbanceState = state;
-                lastDisturbanceDurationSec = state ? durationSec : 0f;
                 hasSentDisturbanceState = true;
             }
         }
 
-        private bool TryGetM2HandleX(out float handleX)
-        {
-            handleX = 0f;
-            if (m2 == null || !m2.IsInitialised() || m2.Client == null || !m2.Client.IsConnected()) return false;
-            if (m2.State == null || m2.State["X"] == null || m2.State["X"].Length < 1) return false;
-            handleX = (float)m2.State["X"][0];
-            if (float.IsNaN(handleX) || float.IsInfinity(handleX)) return false;
-            return true;
-        }
 
-        // If can't get valid handle X input from M2, send zero feedback to prevent unintended behavior.
-        private void SendZeroFeedbackAtSendRate()
-        {
-            if (!trialActive) return;
-            if (SendFeedbackTimer()) SendFeedbackForce(0f, 0f);
-        }
 
         // =======================================================================================
         // --- VEL control logic ---
 
+        // Apply runtime-override gains for open-loop damped VEL mode.
+        private void ApplyForcedVelParamsIfEnabled()
+        {
+            if (!forceVelRuntimeParams) return;
+            velOpenLoopKp = forcedVelOpenLoopKp;
+            velOpenLoopKd = forcedVelOpenLoopKd;
+            velSteerClamp = forcedVelSteerClamp;
+        }
+
+        // Compute the handle X offset relative to the reference, applying deadzone.
         private float ComputeVelHandleXRel(float handleX)
         {
-            float handleXRel = handleX - m2CenterX;
+            // Use trial-start center when ready to avoid fixed-center mismatch.
+            float velCenterX = syncRefReady ? handleXRef : m2CenterX;
+            float handleXRel = handleX - velCenterX;
             if (Mathf.Abs(handleXRel) < velHandleXDeadZone) handleXRel = 0f;
             return handleXRel;
         }
 
-        // VEL mode: handle offset sets target lateral speed, steering closes the vx error.
-        private float ComputeVelSteerFromAcceleration(float handleXRel)
+        // VEL mode (open-loop damped): map handle offset to steer and apply direction-aware damping.
+        private float ComputeVelSteerOpenLoopDamped(float handleXRel, out float currentVx)
         {
-            float targetVx = handleXRel * velHandleXToTargetVx;
-            float currentVx = roverRigidbody != null ? roverRigidbody.linearVelocity.x : 0f;
-            float vxError = targetVx - currentVx;
-            float steer = vxError * velHandleXToSteer;
-            steer = Mathf.Clamp(steer, -steerClamp, steerClamp);
-            return steer;
+            currentVx = roverRigidbody != null ? roverRigidbody.linearVelocity.x : 0f;
+
+            float steerDir = Mathf.Sign(handleXRel);
+            float steer = velOpenLoopKp * handleXRel - velOpenLoopKd * currentVx * steerDir;
+            if (Mathf.Abs(steer) < 1e-4f) return 0f;
+            return Mathf.Clamp(steer, -velSteerClamp, velSteerClamp);
+        }
+
+        // Debug helper to log VEL mode computations at a limited rate to avoid spamming the console.
+        private void WarnVelRealtime(float handleXRel, float currentVx, float steer)
+        {
+            if (!velDebugWarning) return;
+
+            float now = Time.time;
+            float interval = velDebugHz > 0f ? (1f / velDebugHz) : 0f;
+            if (now < nextVelDebugTime) return;
+            nextVelDebugTime = now + interval;
+
+            Debug.LogWarning(
+                $"[M2 VEL #{GetInstanceID()}] handleXRel={handleXRel:F4}, currentVx={currentVx:F4}, steer={steer:F4}, kp={velOpenLoopKp:F3}, kd={velOpenLoopKd:F3}, clamp={velSteerClamp:F3}");
         }
 
 
@@ -437,30 +435,34 @@ namespace CORC.Demo
 
         private void PosHriMode(float handleX)
         {
-            float steer = ComputeSteerPosMode(handleX, enablePosSyncCorrection);
+            float steer = ComputeSteerPosMode(handleX);
             ApplyRoverSteer(steer);
-            SendFeedbackForce(0f, 0f);
+            // SendFeedbackForce(0f, 0f);
         }
 
         private void PosPhriMode(float handleX)
         {
-            float steer = ComputeSteerPosMode(handleX, enablePosSyncCorrection);
+            float steer = ComputeSteerPosMode(handleX);
             ApplyRoverSteer(steer);
-            SendFeedback();
+            // SendFeedbackForce(0f, 0f);
+        }
+
+        private void ApplyVelMode(float handleXRel)
+        {
+            float steer = ComputeVelSteerOpenLoopDamped(handleXRel, out float currentVx);
+            WarnVelRealtime(handleXRel, currentVx, steer);
+            ApplyRoverSteer(steer);
+            // SendFeedbackForce(0f, 0f);
         }
 
         private void VelHriMode(float handleXRel)
         {
-            float steer = ComputeVelSteerFromAcceleration(handleXRel);
-            ApplyRoverSteer(steer);
-            SendFeedbackForce(0f, 0f);
+            ApplyVelMode(handleXRel);
         }
 
         private void VelPhriMode(float handleXRel)
         {
-            float steer = ComputeVelSteerFromAcceleration(handleXRel);
-            ApplyRoverSteer(steer);
-            SendFeedback();
+            ApplyVelMode(handleXRel);
         }
 
         private void HandleKeyboardModeFixedUpdate()
@@ -490,12 +492,10 @@ namespace CORC.Demo
             {
                 SyncRoverToCurrentM2MappedX();
                 hasSentDisturbanceState = false;
-                lastDisturbanceDurationSec = 0f;
             }
             if (!connectedNow)
             {
                 hasSentDisturbanceState = false;
-                lastDisturbanceDurationSec = 0f;
             }
             lastM2Connected = connectedNow;
 
@@ -521,11 +521,8 @@ namespace CORC.Demo
                 }
 
                 if (Input.GetKeyDown(KeyCode.R) && ctrl )
-                {
-                    // if (unityMode == UnityDriveMode.Mode2_M2)
-                    //     SoftResetUnityStateKeepM2Connection();
-                    // else
-                        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+                {   
+                    SceneManager.LoadScene(SceneManager.GetActiveScene().name);
                 }
             }
 
@@ -552,22 +549,23 @@ namespace CORC.Demo
                 return;
             }
 
-             // Can't get handle X, can't proceed with M2 control
-            else if (!TryGetM2HandleX(out float handleX))
+            // Can't get handle X, can't proceed with M2 control
+            else if (!TryGetM2HandleX(out float handleX) && trialActive)
             {
-                SendZeroFeedbackAtSendRate();
+                // SendFeedbackForce(0f, 0f);
+                Debug.LogWarning("[M2RoverBridge] Unable to read M2 handle X position. Check M2 connection and state.");
                 return;
             }
 
             // M2 control mode but trial not active, ensure rover is not moving and send zero feedback.
             else if (!trialActive)
             {
-                SendZeroFeedbackAtSendRate();
                 ApplyRoverSteer(0f);
                 return;
             }
-            else{ // M2 control mode
-                
+
+            // M2 control mode
+            else{ 
                 EnsureSyncReference(handleX);
 
                 int ctrl = ctrlModeCode;
@@ -582,13 +580,12 @@ namespace CORC.Demo
 
                 if (ctrl == 2)// VEL mode
                 {
+                    ApplyForcedVelParamsIfEnabled(); 
                     float handleXRel = ComputeVelHandleXRel(handleX);
                     if (hri == 2) VelPhriMode(handleXRel); // pHRI + VEL mode
                     else VelHriMode(handleXRel); // HRI-only + VEL mode
                     return;
                 }
-
-                SendFeedbackForce(0f, 0f);
             }
         }
 

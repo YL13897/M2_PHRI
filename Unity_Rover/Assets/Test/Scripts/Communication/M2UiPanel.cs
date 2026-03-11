@@ -43,8 +43,6 @@ namespace CORC.Demo
         private bool pendingCtrlApply = false; // Indicates pending CTRL mode setting (S_CT)
         private int pendingHri = 2;
         private int pendingCtrl = 1;
-        private int phaseCode = 0; // 1=TO_A, 2=WAIT_START, 3=TRIAL
-        private int rejectCode = 0; // last reject reason reported by M2
 
         // Helper to parse double with fallback
         // private static bool TryParse(string s, out double v, double fallback = 0) { if (double.TryParse(s, out v)) return true; v = fallback; return false; }
@@ -83,38 +81,11 @@ namespace CORC.Demo
             if (emergencyStopBtn) emergencyStopBtn.interactable = isM2Mode;
         }
 
-        private static string PhaseToText(int code)
-        {
-            switch (code)
-            {
-                case 1: return "TO_A";
-                case 2: return "WAIT_START";
-                case 3: return "TRIAL";
-                default: return "UNKNOWN";
-            }
-        }
-
-        private static string RejectToText(int code)
-        {
-            switch (code)
-            {
-                case 1: return "BUSY_NOT_WAIT_START";
-                case 2: return "BUSY_ALREADY_PENDING";
-                case 3: return "DEBOUNCE_TOO_FAST";
-                default: return "NONE";
-            }
-        }
-
-        private string BuildDiagSuffix()
-        {
-            return $" [Phase:{PhaseToText(phaseCode)} | LastReject:{RejectToText(rejectCode)}]";
-        }
-
         private void SetStatus(Color color, string msg)
         {
             if (!statusTxt) return;
             statusTxt.color = color;
-            statusTxt.text = msg + BuildDiagSuffix();
+            statusTxt.text = msg;
         }
 
         // Try to apply pending HRI/CTRL mode settings if we are waiting for M2 to be ready at A after BGIN
@@ -482,18 +453,6 @@ namespace CORC.Demo
                     bginReady = false;
                     SetCommandButtonsInteractable();
                 }
-                else if (cmd == "PHAS")
-                {
-                    if (p.Length >= 1) phaseCode = (int)Math.Round(p[0]);
-                    if (statusTxt) SetStatus(Color.white, "Phase update received.");
-                }
-                else if (cmd == "RJCT")
-                {
-                    if (p.Length >= 1) rejectCode = (int)Math.Round(p[0]);
-                    if (p.Length >= 2) phaseCode = (int)Math.Round(p[1]);
-                    if (statusTxt) SetStatus(Color.yellow, "Reject reason received.");
-                }
-
             }
 
         }

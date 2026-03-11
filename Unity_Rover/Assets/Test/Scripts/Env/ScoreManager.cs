@@ -11,13 +11,10 @@ public class ScoreManager : MonoBehaviour
     [SerializeField] TextMeshProUGUI sectionScoreText;
     [SerializeField] Slider sectionBar;
 
-    [Header("Section bar settings")]
-    // [SerializeField] float sectionBarMax = 9f; // tune
-    // [SerializeField] bool clampSectionBar = true;
-
     public float GlobalScore { get; private set; }
     public float SectionScore { get; private set; }
     public bool IsScorePaused { get; private set; }
+    private double nextPenaltytime = 0.0;
 
     void Awake()
     {
@@ -37,6 +34,7 @@ public class ScoreManager : MonoBehaviour
     {
         GlobalScore = 0f;
         IsScorePaused = false;
+        nextPenaltytime = 0.0;
         ResetSection();
         RefreshUI();
     }
@@ -52,7 +50,6 @@ public class ScoreManager : MonoBehaviour
         if (sectionBar != null)
         {
             sectionBar.minValue = 0f;
-            // sectionBar.maxValue = sectionBarMax;
             sectionBar.maxValue = 9f;
             sectionBar.value = 0f;
         }
@@ -75,6 +72,18 @@ public class ScoreManager : MonoBehaviour
         RefreshUI();
     }
 
+    // Global gate: even if multiple callers fire, penalty can apply at most once per cooldown window.
+    public bool TryApplyBoundaryPenalty(float penalty, float cooldownSec)
+    {
+        double now = Time.realtimeSinceStartupAsDouble;
+        float cooldown = Mathf.Max(0.01f, cooldownSec);
+        if (now < nextPenaltytime) return false;
+
+        ApplyBoundaryPenalty(Mathf.Abs(penalty));
+        nextPenaltytime = now + cooldown;
+        return true;
+    }
+
 
     // UI update
     public void UpdateBoundaryUI(float x, float minX, float maxX)
@@ -95,12 +104,5 @@ public class ScoreManager : MonoBehaviour
 
         if (sectionScoreText != null)
             sectionScoreText.text = $"SeSc: {SectionScore:0}";
-
-        // if (sectionBar != null)
-        // {   
-        //     float v = SectionScore;
-        //     if (clampSectionBar) v = Mathf.Clamp(v, 0f, sectionBarMax);
-        //     sectionBar.value = v;
-        // }
     }
 }

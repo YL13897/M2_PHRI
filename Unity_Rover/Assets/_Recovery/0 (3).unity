@@ -2122,7 +2122,7 @@ MonoBehaviour:
   isDriving: 0
   isPaused: 0
   preserveLateralVelocity: 0
-  lateralDamping: 4.5
+  lateralDamping: 4
 --- !u!65 &481331126
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -2229,7 +2229,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CORC.Demo.M2RoverBridge
   m2: {fileID: 507810787}
   rover: {fileID: 481331125}
-  worldFollower: {fileID: 507810790}
+  worldFollower: {fileID: 0}
   roverTransform: {fileID: 481331129}
   roverRigidbody: {fileID: 481331123}
   m2CenterX: 0.32
@@ -2237,23 +2237,19 @@ MonoBehaviour:
   hriModeCode: 2
   ctrlModeCode: 1
   handleXToSteer: 5
-  velHandleXDeadZone: 0.005
-  velOpenLoopKp: 25
-  velOpenLoopKd: 2.5
-  velSteerClamp: 0.3
-  velDebugWarning: 1
-  velDebugHz: 10
-  forceVelRuntimeParams: 1
-  forcedVelOpenLoopKp: 25
-  forcedVelOpenLoopKd: 2.5
-  forcedVelSteerClamp: 0.3
+  velHandleXDeadZone: 0.003
+  velHandleXToSteer: 5
+  velHandleXToTargetVx: 5
   steerClamp: 1
   enableHotkeys: 1
   targetWorldXScale: 5
   worldXCenter: 0
   unityCenterX: 0
   autoSnapOnM2Reconnect: 1
+  enablePosSyncCorrection: 1
   sendRateHz: 80
+  posCorrKp: 0.25
+  posCorrKd: 0.04
 --- !u!1 &507810783
 GameObject:
   m_ObjectHideFlags: 0
@@ -2264,7 +2260,6 @@ GameObject:
   m_Component:
   - component: {fileID: 507810785}
   - component: {fileID: 507810784}
-  - component: {fileID: 507810791}
   - component: {fileID: 507810787}
   - component: {fileID: 507810786}
   - component: {fileID: 507810789}
@@ -2391,26 +2386,9 @@ MonoBehaviour:
   smooth: 0.25
   biasFollowRate: 10
   biasRecoverRate: 4
---- !u!114 &507810791
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 507810783}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b8595217dca22244bb46c70787e9d722, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::ScoreSystem
-  targetRb: {fileID: 481331123}
-  centerX: 0
-  deviationScoreRate: 1
-  penaltyValue: 500
-  minX: -9
-  maxX: 9
-  enableBoundaryClamp: 1
-  penaltyCooldown: 1
+  hriPosXMin: -9
+  hriPosXMax: 9
+  affectOnlyX: 1
 --- !u!1 &512920198
 GameObject:
   m_ObjectHideFlags: 0
@@ -8237,17 +8215,9 @@ PrefabInstance:
       propertyPath: m_IsActive
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 3613961788385983385, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
-      propertyPath: m_Enabled
-      value: 0
-      objectReference: {fileID: 0}
     - target: {fileID: 4568923834187536208, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
       propertyPath: m_LocalPosition.z
       value: 10
-      objectReference: {fileID: 0}
-    - target: {fileID: 4929079738094337399, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
-      propertyPath: m_IsActive
-      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 6092899326964875217, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
       propertyPath: m_IsActive
@@ -8292,10 +8262,6 @@ PrefabInstance:
     - target: {fileID: 7088770887197310712, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 7361887613219292296, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
-      propertyPath: m_Enabled
-      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 9122915362641144187, guid: bdb5882bcc45f5448b6a4e2304300ae2, type: 3}
       propertyPath: 'm_Materials.Array.data[0]'
