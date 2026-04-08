@@ -1,5 +1,13 @@
+
+// Unity
+using System;
+using System.IO;
+using System.Text;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using TMPro;
+
+
 
 /* 
     This component acts as a bridge between the CORC M2 robot and the Unity rover control, 
@@ -16,6 +24,7 @@ namespace CORC.Demo
         [Header("Refs")]
         public CORC.CORCM2 m2;
         public RoverHandler rover;
+        public LeaderHandler leader;
         public M2WorldFollower worldFollower;
         public Transform roverTransform;
         public Rigidbody roverRigidbody;
@@ -41,7 +50,7 @@ namespace CORC.Demo
 
         [Header("M2 VEL mode (open-loop damped steer)")]
         public float velHandleXDeadZone = 0.01f;
-        public float velOpenLoopKp = 25.0f; // steer response to handle offset
+        public float velOpenLoopKp = 1.0f; // steer response to handle offset
         public float velOpenLoopKd = 2.5f; // damping term from current lateral velocity
         public float velSteerClamp = 0.30f; // VEL-only steering clamp to avoid saturation oscillation
         public bool velDebugWarning = true;
@@ -49,7 +58,7 @@ namespace CORC.Demo
 
         [Header("M2 VEL runtime override")]
         public bool forceVelRuntimeParams = true; // prevent scene/inspector stale values in M2+VEL
-        public float forcedVelOpenLoopKp = 25.0f;
+        public float forcedVelOpenLoopKp = 1.0f;
         public float forcedVelOpenLoopKd = 2.5f;
         public float forcedVelSteerClamp = 0.30f;
 
@@ -63,6 +72,7 @@ namespace CORC.Demo
         public float targetWorldXScale = 5.0f; // Scaling factor to map M2 handle X movement to Unity world X movement.
         public float worldXCenter = 0.0f; // The world X coordinate that corresponds to the M2 handle center (zero) position. 
         [Tooltip("Unity centerline X that should correspond to M2 point A.")]
+        
         public float unityCenterX = 0.0f; // Unity X coordinate that corresponds to M2 handle point A (the center reference).
         public bool autoSnapOnM2Reconnect = true; // Whether to automatically snap rover to M2-mapped position when M2 reconnects, to prevent jump forces due to position mismatch.
 
@@ -93,6 +103,153 @@ namespace CORC.Demo
         // The rover X position recorded at the start of the trial (or after mode switch), used as the reference point for computing target X based on handle movement.
         private float roverXRef = 0.0f;
 
+        // ----------------------------------------------------------------------------------------------------------------------
+        
+        // Delsys EMG background data collection
+        [SerializeField] private bool delsysEnable;
+        private DelsysEMG delsysEMG = new DelsysEMG();
+        [SerializeField] private int emgTrialIndex = 0;
+        [SerializeField] private bool emgIsRecording = false;
+
+        [Header("EMG Channel Preview")]
+        [SerializeField] private int emgPreviewMaxChannels = 8;
+        [SerializeField] private float emgPreviewHz = 5f;
+        private TMP_Text emgScoreText;
+        private float emgScoreScale = 1000f;
+        private float emgScoreEmaLerp = 0.15f; // Smoothing factor for exponential moving average of EMG score, between 0 (no update) and 1 (no smoothing).
+        private float emgScoreFiltered = 0f;
+        private double emgScoreTimestamp = 0.0;
+        private bool emgShutdown = false;
+        private double nextEmgUpdateTime = 0.0; // To control the update rate of EMG preview in the UI, we track the next allowed update time based on the specified preview Hz rate.
+        private string emgSessionFilePath;
+
+        #region Private methods
+        private string ConfigEMGFilePath()
+        {
+            if (!string.IsNullOrEmpty(emgSessionFilePath))
+                return emgSessionFilePath;
+
+            string emgDir = @"D:\yixianglin\Desktop\EMGData";
+            Directory.CreateDirectory(emgDir);
+            string fileName = $"M2Rover_EMG_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+            emgSessionFilePath = Path.Combine(emgDir, fileName);
+            return emgSessionFilePath;
+        }
+
+        public bool IsEmgReady()
+        {
+            return delsysEnable && delsysEMG.IsConnected() && delsysEMG.IsRunning();
+        }
+
+        public bool EmgIsRecording => emgIsRecording;
+
+        private bool TryStartRecording()
+        {
+            if (!IsEmgReady() || emgIsRecording) return false;
+
+            string emgPath = ConfigEMGFilePath();
+            delsysEMG.StartRecording(emgPath, Time.timeAsDouble);
+            emgIsRecording = true;
+            emgTrialIndex++;
+            return true;
+        }
+
+        private bool TryStopRecording()
+        {
+            if (!emgIsRecording) return false;
+
+            if (delsysEMG.IsConnected())
+                delsysEMG.StopRecording();
+
+            emgIsRecording = false;
+            return true;
+        }
+
+        public bool StartEmgRecordingManual()
+        {
+            return TryStartRecording();
+        }
+
+        public bool StopEmgRecordingManual()
+        {
+            return TryStopRecording();
+        }
+
+        private void ShutdownEMG()
+        {
+            if (emgShutdown) return;
+            emgShutdown = true;
+
+            if (!delsysEnable) return;
+
+            try { TryStopRecording(); } catch (Exception ex) { Debug.LogWarning($"[M2RoverBridge] EMG stop recording during shutdown failed: {ex.Message}"); }
+            try { if (delsysEMG.IsRunning()) delsysEMG.StopAcquisition(); } catch (Exception ex) { Debug.LogWarning($"[M2RoverBridge] EMG stop acquisition during shutdown failed: {ex.Message}"); }
+            try { if (delsysEMG.IsConnected()) delsysEMG.Close(); } catch (Exception ex) { Debug.LogWarning($"[M2RoverBridge] EMG close during shutdown failed: {ex.Message}"); }
+        }
+
+        private void UpdateEmgScorePreview()
+        {
+            double now = Time.unscaledTimeAsDouble;
+            double interval = 1.0 / Mathf.Max(1f, emgPreviewHz);
+            if (now < nextEmgUpdateTime) return;
+            nextEmgUpdateTime = now + interval;
+
+            bool hasText = emgScoreText != null;
+
+            bool active = delsysEnable && delsysEMG.IsConnected() && delsysEMG.IsRunning();
+            if (!active)
+            {
+                string inactiveText = $"EMGSc: -- | t: {Time.timeAsDouble:0.0}s";
+                if (hasText) emgScoreText.text = inactiveText;
+                ScoreManager.Instance?.SetEmgPreview(0f, Time.timeAsDouble, inactiveText);
+                return;
+            }
+
+            float[] raw = delsysEMG.GetRawEMGData();
+            if (raw == null || raw.Length == 0)
+            {
+                string emptyText = $"EMGSc: -- | t: {Time.timeAsDouble:0.0}s";
+                if (hasText) emgScoreText.text = emptyText;
+                ScoreManager.Instance?.SetEmgPreview(0f, Time.timeAsDouble, emptyText);
+                return;
+            }
+
+            float absMean = 0f;
+            for (int i = 0; i < raw.Length; i++)
+                absMean += Mathf.Abs(raw[i]);
+            absMean /= raw.Length;
+
+            float emgScore = absMean * emgScoreScale;
+            emgScoreFiltered = Mathf.Lerp(emgScoreFiltered, emgScore, Mathf.Clamp01(emgScoreEmaLerp));
+            emgScoreTimestamp = Time.timeAsDouble;
+
+            string previewText = BuildEmgPreviewText(raw);
+            if (hasText) emgScoreText.text = previewText;
+            ScoreManager.Instance?.SetEmgPreview(emgScoreFiltered, emgScoreTimestamp, previewText);
+        }
+
+        private string BuildEmgPreviewText(float[] raw)
+        {
+            StringBuilder sb = new StringBuilder(160);
+            sb.Append("EMGSc: ").Append(emgScoreFiltered.ToString("0.0000"))
+              .Append(" | t: ").Append(emgScoreTimestamp.ToString("0.0")).Append('s');
+
+            int[] activeChannels = delsysEMG.GetChannelsActiveSensor();
+            int previewCount = Mathf.Min(
+                Mathf.Min(raw.Length, activeChannels.Length),
+                Mathf.Clamp(emgPreviewMaxChannels, 1, 8));
+
+            for (int i = 0; i < previewCount; i++)
+            {
+                sb.Append('\n')
+                  .Append("S").Append(activeChannels[i].ToString("D2")) //D2: zero-padded 2-digit channel number
+                  .Append(": ").Append(raw[i].ToString("0.0000000"));
+            }
+
+            return sb.ToString();
+        }
+        #endregion
+
 
         // ----------------------------------------------------------------------------------------------------------------------
         // ------ Unity lifecycle methods ------
@@ -101,6 +258,8 @@ namespace CORC.Demo
         {
             if (rover == null)
                 rover = FindFirstObjectByType<RoverHandler>();
+            if (leader == null)
+                leader = FindFirstObjectByType<LeaderHandler>();
             if (rover != null && roverTransform == null)
                 roverTransform = rover.transform;
             if (rover != null && roverRigidbody == null)
@@ -118,6 +277,23 @@ namespace CORC.Demo
 
             if (!GlobalRandomSeed.IsInitialized)
                 UnityEngine.Random.InitState(GlobalRandomSeed.Seed);
+
+
+            #region Initialize EMG sensors
+            //Initialse Delsys EMG sensor
+            if (delsysEnable)
+            {
+                delsysEMG.Init();
+                bool connected = delsysEMG.Connect();
+                if (connected){
+                    delsysEMG.StartAcquisition();
+                    Debug.LogWarning("Delsys EMG initialized and acquisition started.");
+                }
+                else
+                    Debug.LogWarning("[M2RoverBridge] EMG init failed: cannot connect to Delsys server.");
+            }
+            #endregion
+
         }
 
         // ----------------------------------------------------------------------------------------------------------------------
@@ -179,6 +355,9 @@ namespace CORC.Demo
                 syncRefReady = false; 
                 if (!isPaused) isDriving = true;
                 worldFollower?.ResetBias();
+
+                TryStartRecording();
+
                 if (ScoreManager.Instance != null) ScoreManager.Instance.SetScorePaused(false);
             }
         }
@@ -186,6 +365,8 @@ namespace CORC.Demo
         // This should be called when the trial ends
         public void NotifyTrialEnd()
         {
+            TryStopRecording();
+
             trialActive = false;
             syncRefReady = false;
             if (unityMode == UnityDriveMode.Mode2_M2 && isDriving) isDriving = false;
@@ -254,7 +435,6 @@ namespace CORC.Demo
                 go.SetActive(true); 
             }
         }
-
 
         // =======================================================================================
         // --- Sync logic  ---
@@ -406,7 +586,7 @@ namespace CORC.Demo
             currentVx = roverRigidbody != null ? roverRigidbody.linearVelocity.x : 0f;
 
             float steerDir = Mathf.Sign(handleXRel);
-            float steer = velOpenLoopKp * handleXRel - velOpenLoopKd * currentVx * steerDir;
+            float steer = velOpenLoopKp * handleXRel;
             if (Mathf.Abs(steer) < 1e-4f) return 0f;
             return Mathf.Clamp(steer, -velSteerClamp, velSteerClamp);
         }
@@ -478,12 +658,14 @@ namespace CORC.Demo
 
         void Update()
         {
-            if (rover == null)
-                rover = FindFirstObjectByType<RoverHandler>();
-            if (rover != null && roverTransform == null)
-                roverTransform = rover.transform;
-            if (rover != null && roverRigidbody == null)
-                roverRigidbody = rover.GetComponent<Rigidbody>();
+            // if (rover == null)
+            //     rover = FindFirstObjectByType<RoverHandler>();
+            // if (leader == null)
+            //     leader = FindFirstObjectByType<LeaderHandler>();
+            // if (rover != null && roverTransform == null)
+            //     roverTransform = rover.transform;
+            // if (rover != null && roverRigidbody == null)
+            //     roverRigidbody = rover.GetComponent<Rigidbody>();
 
             bool connectedNow = m2 != null && m2.IsInitialised() && m2.Client != null && m2.Client.IsConnected();
 
@@ -526,15 +708,19 @@ namespace CORC.Demo
                 }
             }
 
-            if (rover != null)
-            {
-                rover.SetPreserveLateralVelocity(unityMode == UnityDriveMode.Mode2_M2);
-                rover.SetPaused(isPaused);
-                rover.SetDriving(isDriving && !isPaused);
-            }
+
+            rover.SetPreserveLateralVelocity(unityMode == UnityDriveMode.Mode2_M2);
+            rover.SetPaused(isPaused);
+            rover.SetDriving(isDriving && !isPaused);
+
+            leader.SetPreserveLateralVelocity(unityMode == UnityDriveMode.Mode2_M2);
+            leader.SetPaused(isPaused);
+            leader.SetDriving(isDriving && !isPaused);
 
             if (ScoreManager.Instance != null)
                 ScoreManager.Instance.SetScorePaused(isPaused || (unityMode == UnityDriveMode.Mode2_M2 && !trialActive));
+
+            UpdateEmgScorePreview();
 
         }    
 
@@ -589,6 +775,17 @@ namespace CORC.Demo
             }
         }
 
+        // Ensure EMG resources are properly released when the object is destroyed or application quits.
+        void OnDestroy() 
+        {
+            ShutdownEMG();
+        }
+
+        // Also ensure EMG shutdown on application quit to cover cases where the object might not be destroyed properly.
+        private void OnApplicationQuit() 
+        {
+            ShutdownEMG();
+        }
 
     }
 }

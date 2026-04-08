@@ -29,6 +29,8 @@ namespace CORC.Demo
         public Button returnWaitStartBtn;
         public Button toAButton;
         public Button emergencyStopBtn;
+        public Button startRecordingBtn;
+        public Button stopRecordingBtn;
 
         [Header("Dropdowns")]
         public TMP_Dropdown unityModeDropdown; // Mode1 keyboard / Mode2 M2
@@ -43,6 +45,8 @@ namespace CORC.Demo
         private bool pendingCtrlApply = false; // Indicates pending CTRL mode setting (S_CT)
         private int pendingHri = 2;
         private int pendingCtrl = 1;
+        private Color startRecIdleColor = Color.white;
+        private readonly Color startRecActiveColor = new Color(0.25f, 0.70f, 0.25f, 1f);
 
         // Helper to parse double with fallback
         // private static bool TryParse(string s, out double v, double fallback = 0) { if (double.TryParse(s, out v)) return true; v = fallback; return false; }
@@ -69,6 +73,7 @@ namespace CORC.Demo
             return idx == 0 ? 1 : 2; // 1: Mode1_Keyboard, 2: Mode2_M2
         }
 
+        // Set command buttons interactable state based on current mode and M2 readiness
         private void SetCommandButtonsInteractable()
         {
             bool isM2Mode = bridge != null && bridge.unityMode == M2RoverBridge.UnityDriveMode.Mode2_M2;
@@ -79,8 +84,29 @@ namespace CORC.Demo
             if (returnWaitStartBtn) returnWaitStartBtn.interactable = isM2Mode && bginReady;
             if (toAButton) toAButton.interactable = isM2Mode;
             if (emergencyStopBtn) emergencyStopBtn.interactable = isM2Mode;
+            
         }
 
+        // Update recording buttons interactable state based on bridge status
+        private void RecordBtnInteract()
+        {
+            bool canStart = bridge.IsEmgReady() && !bridge.EmgIsRecording;
+
+            if (startRecordingBtn)
+            {
+                startRecordingBtn.interactable = canStart;
+
+                if (startRecordingBtn.targetGraphic != null)
+                {
+                    startRecordingBtn.targetGraphic.color = bridge.EmgIsRecording ? startRecActiveColor : startRecIdleColor;
+                }
+            }
+
+            if (stopRecordingBtn)
+                stopRecordingBtn.interactable = true;
+        }
+
+        //  Set status text with color
         private void SetStatus(Color color, string msg)
         {
             if (!statusTxt) return;
@@ -326,6 +352,25 @@ namespace CORC.Demo
             Debug.Log("[UI] Sent stop cmd: SESS");
         }
 
+        private void OnStartRecording()
+        {
+            if (bridge == null) return;
+
+            if (startRecordingBtn)
+                startRecordingBtn.interactable = false; // block double click while handling click
+
+            bridge.StartEmgRecordingManual();
+            RecordBtnInteract();
+        }
+
+        private void OnStopRecording()
+        {
+            if (bridge == null) return;
+
+            bridge.StopEmgRecordingManual();
+            RecordBtnInteract();
+        }
+
 
         // ---------------------------------------------------------------------------------------------
         // ---------------------------------- Unity Lifecycle ------------------------------------------
@@ -343,10 +388,17 @@ namespace CORC.Demo
             if (returnWaitStartBtn) returnWaitStartBtn.onClick.AddListener(OnReturnWaitStart);
             if (toAButton) toAButton.onClick.AddListener(OnToA);
             if (emergencyStopBtn) emergencyStopBtn.onClick.AddListener(OnEmergencyStop);
+            if (startRecordingBtn) startRecordingBtn.onClick.AddListener(OnStartRecording);
+            if (stopRecordingBtn) stopRecordingBtn.onClick.AddListener(OnStopRecording);
             SetCommandButtonsInteractable();
 
             if (bridge == null)
                 bridge = FindFirstObjectByType<M2RoverBridge>();
+
+            if (startRecordingBtn != null && startRecordingBtn.targetGraphic != null)
+                startRecIdleColor = startRecordingBtn.targetGraphic.color;
+
+            RecordBtnInteract();
 
         }
 
@@ -367,6 +419,7 @@ namespace CORC.Demo
             }
 
             TryApplyPendingM2Setup();
+            RecordBtnInteract();
 
             var t = proxy.Time;
             var X = proxy.X;

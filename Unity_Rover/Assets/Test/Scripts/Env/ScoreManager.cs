@@ -9,10 +9,15 @@ public class ScoreManager : MonoBehaviour
     [Header("UI")]
     [SerializeField] TextMeshProUGUI globalScoreText;
     [SerializeField] TextMeshProUGUI sectionScoreText;
+    [SerializeField] TextMeshProUGUI emgScoreText;
     [SerializeField] Slider sectionBar;
 
     public float GlobalScore { get; private set; }
     public float SectionScore { get; private set; }
+    public float EmgScore { get; private set; }
+    public double EmgTimestamp { get; private set; }
+    public string EmgDetails { get; private set; }
+    public bool HasStartedScoring { get; private set; }
     public bool IsScorePaused { get; private set; }
     private double nextPenaltytime = 0.0;
 
@@ -26,6 +31,7 @@ public class ScoreManager : MonoBehaviour
 
         if (globalScoreText != null) globalScoreText.raycastTarget = false;
         if (sectionScoreText != null) sectionScoreText.raycastTarget = false;
+        if (emgScoreText != null) emgScoreText.raycastTarget = false;
 
         ResetAll();
     }
@@ -33,9 +39,35 @@ public class ScoreManager : MonoBehaviour
     public void ResetAll()
     {
         GlobalScore = 0f;
+        EmgScore = 0f;
+        EmgTimestamp = 0.0;
+        EmgDetails = "";
+        HasStartedScoring = false;
         IsScorePaused = false;
         nextPenaltytime = 0.0;
         ResetSection();
+        RefreshUI();
+    }
+
+    public void BeginScoring()
+    {
+        if (HasStartedScoring) return;
+        HasStartedScoring = true;
+        ResetSection();
+    }
+
+    public void SetEmgScore(float score, double timestamp)
+    {
+        EmgScore = Mathf.Max(0f, score);
+        EmgTimestamp = timestamp;
+        RefreshUI();
+    }
+
+    public void SetEmgPreview(float score, double timestamp, string details)
+    {
+        EmgScore = Mathf.Max(0f, score);
+        EmgTimestamp = timestamp;
+        EmgDetails = details ?? "";
         RefreshUI();
     }
 
@@ -72,11 +104,10 @@ public class ScoreManager : MonoBehaviour
         RefreshUI();
     }
 
-    // Global gate: even if multiple callers fire, penalty can apply at most once per cooldown window.
     public bool TryApplyBoundaryPenalty(float penalty, float cooldownSec)
     {
         double now = Time.realtimeSinceStartupAsDouble;
-        float cooldown = Mathf.Max(0.01f, cooldownSec);
+        float cooldown = Mathf.Max(0.5f, cooldownSec);
         if (now < nextPenaltytime) return false;
 
         ApplyBoundaryPenalty(Mathf.Abs(penalty));
@@ -104,5 +135,10 @@ public class ScoreManager : MonoBehaviour
 
         if (sectionScoreText != null)
             sectionScoreText.text = $"SeSc: {SectionScore:0}";
+
+        if (emgScoreText != null)
+            emgScoreText.text = string.IsNullOrEmpty(EmgDetails)
+                ? $"EMG: {EmgScore:0.00} | t: {EmgTimestamp:0.000}s"
+                : EmgDetails;
     }
 }

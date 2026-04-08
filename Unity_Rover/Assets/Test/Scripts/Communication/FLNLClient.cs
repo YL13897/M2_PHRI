@@ -127,9 +127,20 @@ namespace CORC
             Logging = val;
             if (!Logging) //i.e. stop logging
             {
-                LogFileStream.Dispose();
+                LogFileStream?.Dispose();
             }
             return Logging;
+        }
+
+        private void MarkDisconnected(string context, Exception ex = null)
+        {
+            Connected = false;
+            IsValues = false;
+            Console.WriteLine(ex == null
+                ? $"Server disconnected ({context})"
+                : $"Server disconnected ({context}: {ex.Message})");
+
+            try { client?.Close(); } catch { }
         }
 
 
@@ -184,9 +195,17 @@ namespace CORC
                     bytes[bytes.Length - 1] = Checksum(bytes);
                     stream.Write(bytes, 0, bytes.Length);
                 }
+                catch (IOException ioException)
+                {
+                    MarkDisconnected("IOException during SendCmd", ioException);
+                }
                 catch (SocketException socketException)
                 {
-                    Console.WriteLine("Server disconnected (SocketException " + socketException.ToString() + ")");
+                    MarkDisconnected("SocketException during SendCmd", socketException);
+                }
+                catch (ObjectDisposedException disposedException)
+                {
+                    MarkDisconnected("ObjectDisposedException during SendCmd", disposedException);
                 }
             }
         }
@@ -224,9 +243,17 @@ namespace CORC
                     bytes[bytes.Length - 1] = Checksum(bytes);
                     stream.Write(bytes, 0, bytes.Length);
                 }
+                catch (IOException ioException)
+                {
+                    MarkDisconnected("IOException during SendValues", ioException);
+                }
                 catch (SocketException socketException)
                 {
-                    Console.WriteLine("Server disconnected (SocketException " + socketException.ToString() + ")");
+                    MarkDisconnected("SocketException during SendValues", socketException);
+                }
+                catch (ObjectDisposedException disposedException)
+                {
+                    MarkDisconnected("ObjectDisposedException during SendValues", disposedException);
                 }
             }
         }
@@ -353,9 +380,17 @@ namespace CORC
                     }
                 }
             }
+            catch (IOException ioException)
+            {
+                MarkDisconnected("IOException during Receive", ioException);
+            }
             catch (SocketException socketException)
             {
-                Console.WriteLine("Server disconnected (SocketException " + socketException + ")");
+                MarkDisconnected("SocketException during Receive", socketException);
+            }
+            catch (ObjectDisposedException disposedException)
+            {
+                MarkDisconnected("ObjectDisposedException during Receive", disposedException);
             }
         }
 

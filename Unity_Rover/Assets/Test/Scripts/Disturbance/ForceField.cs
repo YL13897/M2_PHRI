@@ -19,6 +19,7 @@ public class ForceField : MonoBehaviour
     CORC.Demo.M2RoverBridge bridge;
 
     public float forceMagnitude = 2e3f;
+    // public float forceMagnitude = 1f;
     public Vector3 fixedDirection = Vector3.left; // direction of the force field effect
 
     // IsActiveThisRun: Indicates whether this force field instance is active for the current player traversal, determined by sampling the trigger probability on entry.

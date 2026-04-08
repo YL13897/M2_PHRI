@@ -20,7 +20,7 @@ public class WorldProbPanel : MonoBehaviour
 
     public void Show(float probability)
     {
-        probabilityText.text = $"Probability: {(probability * 100f):0}%";
+        probabilityText.text = $"{(probability * 100f):0}%";
         canvasGroup.alpha = 1f;
         canvasGroup.interactable = false;
         canvasGroup.blocksRaycasts = false;

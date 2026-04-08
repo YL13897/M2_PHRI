@@ -23,7 +23,14 @@ public class SectionScoreResetZone : MonoBehaviour
 
         triggered = true;
 
-        if (ScoreManager.Instance != null)
+        if (ScoreManager.Instance == null) return;
+
+        if (transform.root.name.StartsWith("Section_BGIN"))
+            return;
+
+        if (!ScoreManager.Instance.HasStartedScoring)
+            ScoreManager.Instance.BeginScoring();
+        else
             ScoreManager.Instance.ResetSection();
     }
 }

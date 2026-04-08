@@ -5,11 +5,12 @@ public class ScoreSystem : MonoBehaviour
     [Header("Player")]
     [SerializeField] Rigidbody targetRb;
 
-    [Header("Centerline reference")]
-    public float centerX = 0f;
+    [Header("Leader")]
+    [SerializeField] Rigidbody leaderRb;
 
     [Header("Scoring Parameters")]
-    public float deviationScoreRate = 1.0f; // score per meter per second (abs(e)*dt)
+    public float trackingScoreRate = 10.0f; // max score per second when player x stays within the leader width band
+    public float CappedWidthX = 1.0f; // full-score band around the leader center
     public float penaltyValue = 500f;
 
     [Header("Global Boundary")]
@@ -28,39 +29,47 @@ public class ScoreSystem : MonoBehaviour
             if (player != null) targetRb = player.GetComponent<Rigidbody>();
         }
 
-        if (targetRb == null)
-            Debug.LogError("[ScoreSystem] No target Rigidbody assigned or found with tag 'Player'.");
+        if (leaderRb == null)
+        {
+            LeaderHandler leader = FindFirstObjectByType<LeaderHandler>();
+            if (leader != null) leaderRb = leader.GetComponent<Rigidbody>();
+        }
+
+        if (targetRb == null || leaderRb == null)
+            Debug.LogError("[ScoreSystem] No Rigidbody assigned or found.");
+
+        if (ScoreManager.Instance == null)
+            Debug.LogError("[ScoreSystem] No ScoreManager instance found in the scene.");
     }
 
     void FixedUpdate()
     {
-        if (targetRb == null) return;
-        if (ScoreManager.Instance == null) return;
+        // if (targetRb == null || leaderRb == null || ScoreManager.Instance == null) return;
 
-        // If the score is currently paused, prevent player movement and skip scoring.
-        if (ScoreManager.Instance.IsScorePaused)
+        if (!ScoreManager.Instance.HasStartedScoring || ScoreManager.Instance.IsScorePaused)
         {
-            targetRb.linearVelocity = Vector3.zero;
             return;
         }
 
-        // Update the boundary UI with the player's current position and the defined boundaries.
         ScoreManager.Instance.UpdateBoundaryUI(targetRb.position.x, minX, maxX);
 
-        bool boundaryContact = ClampAndDetectBoundaryContact();
+        bool boundaryContact = DetectBoundaryContact();
+        // Global gate: even if multiple callers fire, penalty can apply at most once per cooldown window.
         if (boundaryContact)
-        {
-            // If the player is in contact with the boundary, apply a penalty to the score and skip further scoring for this frame.
+        {   
             ScoreManager.Instance.TryApplyBoundaryPenalty(penaltyValue, penaltyCooldown);
             return;
         }
 
-        float e = targetRb.position.x - centerX;
-        float deltaScore = deviationScoreRate * Mathf.Abs(e) * Time.fixedDeltaTime;
+        float xError = Mathf.Abs(targetRb.position.x - leaderRb.position.x);
+        float cappedError = Mathf.Max(0f, xError - CappedWidthX);
+        float maxError = Mathf.Max(0.001f, (maxX - minX) - CappedWidthX);
+        float closeness = 1f - Mathf.Clamp01(cappedError / maxError);
+        float deltaScore = trackingScoreRate * closeness * Time.fixedDeltaTime;
         ScoreManager.Instance.AddToScores(deltaScore);
     }
 
-    bool ClampAndDetectBoundaryContact()
+    bool DetectBoundaryContact()
     {
         if (!enableBoundaryClamp) return false;
 

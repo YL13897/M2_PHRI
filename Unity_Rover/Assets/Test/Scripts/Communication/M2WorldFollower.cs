@@ -60,8 +60,13 @@ public class M2WorldFollower : MonoBehaviour
         {
             if (IsHriPosDisturbanceActive())
             {
+                // Compute the desired bias: current marker x-position relative to the nominal reference
                 float desiredBias = marker.position.x - nominalX;
+                // Compute smoothing factor (alpha) based on follow rate and physics timestep. 
+                // Clamp to [0,1] to ensure stable interpolation
                 float biasAlpha = Mathf.Clamp01(biasFollowRate * Time.fixedDeltaTime);
+                // Smoothly update the synchronized bias using linear interpolation (exponential smoothing)
+                // This gradually moves syncXBias toward desiredBias instead of jumping instantly.
                 syncXBias = Mathf.Lerp(syncXBias, desiredBias, biasAlpha);
             }
             else
