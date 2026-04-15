@@ -107,9 +107,10 @@ namespace CORC.Demo
         
         // Delsys EMG background data collection
         [SerializeField] private bool delsysEnable;
+        [SerializeField] private EMGFilter emgFilter;
         private DelsysEMG delsysEMG = new DelsysEMG();
         [SerializeField] private int emgTrialIndex = 0;
-        [SerializeField] private bool emgIsRecording = false;
+        private bool emgIsRecording = false;
 
         [Header("EMG Channel Preview")]
         [SerializeField] private int emgPreviewMaxChannels = 8;
@@ -142,6 +143,7 @@ namespace CORC.Demo
         }
 
         public bool EmgIsRecording => emgIsRecording;
+        public int[] GetActiveEmgChannels() => delsysEMG.GetChannelsActiveSensor();
 
         private bool TryStartRecording()
         {
@@ -214,12 +216,15 @@ namespace CORC.Demo
                 return;
             }
 
+            // Compute a simple EMG score as the mean absolute value of the raw EMG signal across all channels, scaled by emgScoreScale.
             float absMean = 0f;
             for (int i = 0; i < raw.Length; i++)
                 absMean += Mathf.Abs(raw[i]);
             absMean /= raw.Length;
 
             float emgScore = absMean * emgScoreScale;
+
+            // Apply exponential moving average to smooth the EMG score for preview display and scoring, to avoid excessive jitter from raw EMG fluctuations.
             emgScoreFiltered = Mathf.Lerp(emgScoreFiltered, emgScore, Mathf.Clamp01(emgScoreEmaLerp));
             emgScoreTimestamp = Time.timeAsDouble;
 
@@ -256,6 +261,8 @@ namespace CORC.Demo
 
         void Awake()
         {
+            emgIsRecording = false;
+
             if (rover == null)
                 rover = FindFirstObjectByType<RoverHandler>();
             if (leader == null)
@@ -283,7 +290,10 @@ namespace CORC.Demo
             //Initialse Delsys EMG sensor
             if (delsysEnable)
             {
-                delsysEMG.Init();
+                if (emgFilter == null)
+                    emgFilter = FindFirstObjectByType<EMGFilter>();
+
+                delsysEMG.Init(emgFilter);
                 bool connected = delsysEMG.Connect();
                 if (connected){
                     delsysEMG.StartAcquisition();

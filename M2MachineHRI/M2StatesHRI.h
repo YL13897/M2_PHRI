@@ -194,7 +194,7 @@ class M2ProbMoveState : public M2TimedState {
         double trialStartTime = 0.0;
         // double effortIntegral = 0.0;
         // double rawEffortIntegral = 0.0;
-        double trialDurationSec = 300.0;
+        double trialDurationSec = 3600.0;
         int trialIndex_ = 0;
 
         // --- UI command debounce ---

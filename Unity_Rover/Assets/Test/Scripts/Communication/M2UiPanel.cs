@@ -45,7 +45,7 @@ namespace CORC.Demo
         private bool pendingCtrlApply = false; // Indicates pending CTRL mode setting (S_CT)
         private int pendingHri = 2;
         private int pendingCtrl = 1;
-        private Color startRecIdleColor = Color.white;
+        private readonly Color startRecIdleColor = new Color(0.85f, 0.85f, 0.85f, 1f);
         private readonly Color startRecActiveColor = new Color(0.25f, 0.70f, 0.25f, 1f);
 
         // Helper to parse double with fallback
@@ -103,7 +103,7 @@ namespace CORC.Demo
             }
 
             if (stopRecordingBtn)
-                stopRecordingBtn.interactable = true;
+                stopRecordingBtn.interactable = bridge.EmgIsRecording;
         }
 
         //  Set status text with color
@@ -395,15 +395,13 @@ namespace CORC.Demo
             if (bridge == null)
                 bridge = FindFirstObjectByType<M2RoverBridge>();
 
-            if (startRecordingBtn != null && startRecordingBtn.targetGraphic != null)
-                startRecIdleColor = startRecordingBtn.targetGraphic.color;
-
             RecordBtnInteract();
 
         }
 
         void Update()
         {
+            RecordBtnInteract();
             if (disturbanceTxt) disturbanceTxt.text = $"Disturbance: {ForceField.DisturbanceU:F1}";
 
             if (proxy == null || !proxy.IsReady)
@@ -419,7 +417,6 @@ namespace CORC.Demo
             }
 
             TryApplyPendingM2Setup();
-            RecordBtnInteract();
 
             var t = proxy.Time;
             var X = proxy.X;

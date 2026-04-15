@@ -230,6 +230,10 @@ void M2ProbMoveState::duringCode() {
             if (cu.rfind("RWST", 0) == 0) {
                 if (currentPhase == TRIAL) {
                     unityForceCmd_.setZero();
+                    if (machine && machine->UIserver) {
+                        machine->UIserver->sendCmd("TRND");
+                        spdlog::info("TRIAL: RWST accepted -> TRND");
+                    }
                     pendingStart = false;
                     initToA = true;
                     inBandSince = 0.0;
@@ -253,7 +257,7 @@ void M2ProbMoveState::duringCode() {
 
             // Manual return to TO_A from WAIT_START
             if (cu.rfind("TO_A", 0) == 0) {
-                if (currentPhase == WAIT_START) {
+                if (currentPhase != TRIAL) {
                     pendingStart = false;
                     initToA = true;
                     inBandSince = 0.0;
@@ -262,10 +266,10 @@ void M2ProbMoveState::duringCode() {
                     waitLatchEnabled_ = false;
                     currentPhase = TO_A;
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-                    spdlog::info("WAIT_START: TO_A received -> TO_A");
+                    spdlog::info("PHASE {}: TO_A received -> TO_A", (int)currentPhase);
                 } else {
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
-                    spdlog::warn("TO_A rejected: phase={} (only WAIT_START accepts TO_A)", (int)currentPhase);
+                    spdlog::warn("TO_A rejected: phase={} (TRIAL does not accept TO_A)", (int)currentPhase);
                 }
                 machine->UIserver->clearCmd();
                 continue;
