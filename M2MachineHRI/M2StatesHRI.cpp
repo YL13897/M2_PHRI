@@ -285,9 +285,11 @@ void M2ProbMoveState::duringCode() {
                 continue;
             }
 
-            // Disturbance active flag from Unity: DSTR [0/1]
+            // Disturbance active flag from Unity: DSTR [-1/0/+1]
             if (cu.rfind("DSTR", 0) == 0) {
-                disturbanceActive_ = (!a.empty() && a[0] > 0.5); //  0.5 threshold for boolean flag
+                double disturbanceCmd = a.empty() ? 0.0 : a[0];
+                disturbanceActive_ = std::abs(disturbanceCmd) > 0.5;
+                disturbanceDirection_ = disturbanceCmd >= 0.0 ? 1.0 : -1.0;
                 if (disturbanceActive_) {
                     disturbanceExpireAt_ = running() + disturbanceAutoOffSec_;
                 } else {
@@ -477,12 +479,12 @@ void M2ProbMoveState::duringCode() {
             if (HRIMode_ == V2_PHRI && CtrlMode_ == V1_POS) {
                 // Native pHRI force generation on M2 side: disturbance only when active.
                 F_unity.setZero();
-                if (disturbanceActive_) F_internal(0) += disturbanceForceX_;
+                if (disturbanceActive_) F_internal(0) += disturbanceDirection_ * disturbanceForceMagnitude_;
             }
             // 2. V2_PHRI + V2_VEL: implemented (X velocity sync + force, Y locked)
             else if (HRIMode_ == V2_PHRI && CtrlMode_ == V2_VEL) {
                 F_unity.setZero();
-                if (disturbanceActive_) F_internal(0) += disturbanceForceX_;
+                if (disturbanceActive_) F_internal(0) += disturbanceDirection_ * disturbanceForceMagnitude_;
             }
             // 3. V1_HRI + V1_POS: framework reserved (to be implemented)
             else if (HRIMode_ == V1_HRI && CtrlMode_ == V1_POS) {
