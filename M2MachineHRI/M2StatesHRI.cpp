@@ -645,7 +645,8 @@ void M2ProbMoveState::openCSV() {
         return;
     }
     if (csv.tellp() == 0) {
-        csv << "trial_index,time_trial,sys_time,session_id,hri_mode,ctrl_mode,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort,disturbance_active\n";
+        // csv << "trial_index,time_trial,sys_time,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort,disturbance_active,disturbance_direction\n";
+        csv << "trial_index,time_trial,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort,disturbance_active,disturbance_direction\n";
     }
 }
 
@@ -654,17 +655,16 @@ void M2ProbMoveState::writeCSV(double tTrial, const VM2& pos, const VM2& vel,
     const VM2& handleForce, const VM2& fInternal, const VM2& fUser, double effort) {
     if (!csv.is_open()) return;
     const double sys_t = system_time_sec();
-    const std::string sid = (machine ? machine->sessionId : std::string("UNSET"));
     csv << std::fixed << std::setprecision(6)
         << trialIndex_ << ","
-        << tTrial << "," << sys_t << "," << sid << ","
-        << ((HRIMode_ == V2_PHRI) ? 2 : 1) << ","
-        << ((CtrlMode_ == V2_VEL) ? 2 : 1) << ","
+        // << tTrial << "," << sys_t << ","
+        << tTrial << ","
         << pos(0) << "," << pos(1) << ","
         << vel(0) << "," << vel(1) << ","
         << handleForce(0) << "," << handleForce(1) << ","
         << fInternal(0) << "," << fInternal(1) << ","
         << fUser(0) << "," << fUser(1) << ","
         << effort << ","
-        << (disturbanceActive_ ? 1 : 0) << "\n";
+        << (disturbanceActive_ ? 1 : 0) << ","
+        << disturbanceDirection_ << "\n";
 }

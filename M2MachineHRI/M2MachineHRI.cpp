@@ -104,12 +104,12 @@ void M2MachineHRI::init() {
     spdlog::debug("M2Machine::init()");
     if (robot()->initialise()) {
         // Basic machine-wide CSV logger (position/velocity/force)
-        logHelper.initLogger("M2MachineLog", "logs/M2Machine.csv", LogFormat::CSV, true);
-        logHelper.add(runningTime(),                 "Time (s)");
-        logHelper.add(robot()->getEndEffPosition(),  "Position");
-        logHelper.add(robot()->getEndEffVelocity(),  "Velocity");
-        logHelper.add(robot()->getEndEffForce(),     "Force");
-        logHelper.startLogger();
+        // logHelper.initLogger("M2MachineLog", "logs/M2Machine.csv", LogFormat::CSV, true);
+        // logHelper.add(runningTime(),                 "Time (s)");
+        // logHelper.add(robot()->getEndEffPosition(),  "Position");
+        // logHelper.add(robot()->getEndEffVelocity(),  "Velocity");
+        // logHelper.add(robot()->getEndEffForce(),     "Force");
+        // logHelper.startLogger();
         // Initialise a default session id with epoch seconds if Unity hasn't set one yet
         if (sessionId == "UNSET") {
             auto now = std::chrono::system_clock::now();
