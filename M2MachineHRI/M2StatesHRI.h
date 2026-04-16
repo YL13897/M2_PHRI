@@ -103,7 +103,6 @@ class M2ProbMoveState : public M2TimedState {
         
         // --- Experiment config ---
         VM2 A{0.32, 0.30}; // Target A position (m)
-        std::vector<VM2> trialEndPositions_;
         
         // --- Workspace limits and wall config ---
         bool softWallEnabled = false; // only enable walls after reaching A
@@ -149,9 +148,6 @@ class M2ProbMoveState : public M2TimedState {
         // Impedance control gains: Used in VM2 M2ProbMoveState::impedance
         double k = 300;
         double d = 15;
-
-        // Sequence number for UI messages, for debugging
-        int txSeq_ = 0; 
 
         // Flags to simulate entryCode() for each phase
         bool initToA = true;
@@ -212,9 +208,6 @@ class M2ProbMoveState : public M2TimedState {
             VM2    vel;    // end-eff velocity
             VM2    force;  // sensed end-eff force
         };
-
-        // Helper to send a command to the UI server with logging
-        void sendUI_(const std::string& msg);
 
 
         // -------------------------------------------------------------

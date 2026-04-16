@@ -150,7 +150,6 @@ void M2ProbMoveState::entryCode() {
 
     robot->initTorqueControl();
     robot->setEndEffForceWithCompensation(VM2::Zero(), false);
-    trialEndPositions_.clear();
     currentPhase = TO_A;
     finishedFlag = false;
     initToA = true; // will trigger TO_A entry code on first loop
@@ -545,15 +544,6 @@ void M2ProbMoveState::exitCode() {
 
 // -----------------------------------------------------------------------------
 // --- M2ProbMoveState helper methods ---
-
-// Send a plain-text/structured line back to UI
-void M2ProbMoveState::sendUI_(const std::string& msg) {
-    if (msg.empty()) return;
-    ++this->txSeq_;
-    if (machine && machine->UIserver) {
-        machine->UIserver->sendCmd(msg);
-    } 
-}
 
 // Compute impedance control force based on current state and optional desired acceleration
 VM2 M2ProbMoveState::impedance(const VM2& X0, const VM2& X, const VM2& dX, const VM2& dXd) {
