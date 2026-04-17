@@ -159,7 +159,7 @@ void M2ProbMoveState::entryCode() {
     lastStartTime = -1.0;
     rwstAckPending_ = false;
     softWallEnabled = false;
-    unityForceCmd_ = VM2::Zero();
+    // unityForceCmd_ = VM2::Zero();
     disturbanceActive_ = false;
     disturbanceExpireAt_ = -1.0;
     yLockEnabled_ = false; // Lock Y movement after reaching A, to encourage strategic planning in X direction
@@ -170,7 +170,7 @@ void M2ProbMoveState::entryCode() {
 }
 
 // Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL), 
-// feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
+    // feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
 void M2ProbMoveState::duringCode() {
 
     // === GLOBAL COMMAND DRAIN === (TRBG/RWST/FRC2/DSTR/S_MD/S_CT)
@@ -228,7 +228,7 @@ void M2ProbMoveState::duringCode() {
             // Manual return to WAIT_START from TRIAL for quick reconfiguration.
             if (cu.rfind("RWST", 0) == 0) {
                 if (currentPhase == TRIAL) {
-                    unityForceCmd_.setZero();
+                    // unityForceCmd_.setZero();
                     if (machine && machine->UIserver) {
                         machine->UIserver->sendCmd("TRND");
                         spdlog::info("TRIAL: RWST accepted -> TRND");
@@ -274,15 +274,19 @@ void M2ProbMoveState::duringCode() {
                 continue;
             }
 
-            // Continuous Unity->M2 feedback force update (used during TRIAL)
-            if (cu.rfind("FRC2", 0) == 0) {
-                if (a.size() >= 2) {
-                    unityForceCmd_(0) = a[0];
-                    unityForceCmd_(1) = a[1];
-                }
-                machine->UIserver->clearCmd();
-                continue;
-            }
+
+        // ------------------------- For testing ----------------------------------------
+        // Continuous Unity->M2 feedback force update (used during TRIAL)
+            // if (cu.rfind("FRC2", 0) == 0) {
+            //     if (a.size() >= 2) {
+            //         unityForceCmd_(0) = a[0];
+            //         unityForceCmd_(1) = a[1];
+            //     }
+            //     machine->UIserver->clearCmd();
+            //     continue;
+            // }
+        // ------------------------------------------------------------------------------
+
 
             // Disturbance active flag from Unity: DSTR [-1/0/+1]
             if (cu.rfind("DSTR", 0) == 0) {
@@ -326,7 +330,7 @@ void M2ProbMoveState::duringCode() {
 
             // Emergency stop: finish ProbMove and return Standby via top-level transition
             if (cu.rfind("SESS",0)==0) {
-                unityForceCmd_.setZero();
+                // unityForceCmd_.setZero();
                 waitLatchEnabled_ = false;
                 finishedFlag = true;
                 spdlog::info("SESS received: finish ProbMove and return Standby");
@@ -471,7 +475,8 @@ void M2ProbMoveState::duringCode() {
             double tTrial = running() - trialStartTime;
 
             VM2 F_internal = VM2::Zero();
-            VM2 F_unity = unityForceCmd_;
+            // VM2 F_unity = unityForceCmd_;
+            VM2 F_unity = VM2::Zero();
 
             // Four-mode framework:
             // 1. V2_PHRI + V1_POS: implemented (X sync + force, Y locked)
@@ -506,7 +511,7 @@ void M2ProbMoveState::duringCode() {
                     machine->UIserver->sendCmd("TRND");
                     spdlog::info("Log: TRND (tTrial={:.3f}s)", tTrial);
                 }
-                unityForceCmd_.setZero();
+                // unityForceCmd_.setZero();
                 pendingStart = false;
                 initTrial = true;
                 waitLatchEnabled_ = false;
@@ -527,7 +532,7 @@ void M2ProbMoveState::duringCode() {
 
 // Cleanup on ProbMove exit: zero forces, close CSVs, send session summary
 void M2ProbMoveState::exitCode() {
-    unityForceCmd_ = VM2::Zero();
+    // unityForceCmd_ = VM2::Zero();
     waitLatchEnabled_ = false;
     robot->setEndEffForceWithCompensation(VM2::Zero());
     if (csv.is_open()) csv.close();
@@ -646,7 +651,7 @@ void M2ProbMoveState::openCSV() {
     }
     if (csv.tellp() == 0) {
         // csv << "trial_index,time_trial,sys_time,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort,disturbance_active,disturbance_direction\n";
-        csv << "trial_index,time_trial,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort,disturbance_active,disturbance_direction\n";
+        csv << "trial_index,time_trial,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,effort,disturbance_active,disturbance_direction\n";
     }
 }
 
@@ -663,7 +668,6 @@ void M2ProbMoveState::writeCSV(double tTrial, const VM2& pos, const VM2& vel,
         << vel(0) << "," << vel(1) << ","
         << handleForce(0) << "," << handleForce(1) << ","
         << fInternal(0) << "," << fInternal(1) << ","
-        << fUser(0) << "," << fUser(1) << ","
         << effort << ","
         << (disturbanceActive_ ? 1 : 0) << ","
         << disturbanceDirection_ << "\n";

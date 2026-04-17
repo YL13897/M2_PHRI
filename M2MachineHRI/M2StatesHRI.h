@@ -167,7 +167,7 @@ class M2ProbMoveState : public M2TimedState {
         int Ctrl_Mode = 1;
 
         // Unity feedback force command (updated by FRC2, applied in TRIAL)
-        VM2 unityForceCmd_ = VM2::Zero();
+        // VM2 unityForceCmd_ = VM2::Zero();
 
         // Disturbance state from Unity (DSTR -1/0/+1). In pHRI we use native M2 disturbance force.
         bool disturbanceActive_ = false;
