@@ -117,35 +117,50 @@ void M2CalibState::exitCode() {
 // ----------------------------------------------------------------------------
 // --- M2StandbyState implementation ---
 
-// Enter standby: reset moving flag, wait 5 sec
+// Enter standby: reset moving flag, wait 3 sec
 void M2StandbyState::entryCode() {
-    spdlog::warn("Entering Standby! Will hold limp for 5s, then move to A.");
+    spdlog::warn("Entering Standby! Will hold limp for 3s, then move to A.");
     robot->initTorqueControl();
     isMoving = false;
+    safetyTripped = false; // reset safety trip on entry; will be set if excessive speed detected during standby
 }
 
-// Idle loop: wait 5 sec at zero force, then min-jerk to point A
+// Idle loop: wait 3 sec at zero force, then min-jerk to point A
 void M2StandbyState::duringCode() {
     VM2 X = robot->getEndEffPosition();
     VM2 dX = robot->getEndEffVelocity();
 
-    // Guard against physically impossible velocities or disconnected sensor
-    if (dX.norm() > 1.5) {
-        if (iterations() % 500 == 1) spdlog::error("STANDBY SAFETY TRIP: Speed {:.2f}m/s > 1.5m/s! Disabling forces.", dX.norm());
+    if (safetyTripped) {
         robot->setEndEffForceWithCompensation(VM2::Zero(), false);
         return;
     }
 
-    if (running() < 5.0) {
-        // First 5 seconds of standby: Completely Limp
+    // Guard against dead/offline position sensor returning exactly zero
+    if (X.norm() < 0.0001) {
+        safetyTripped = true;
+        spdlog::error("STANDBY SAFETY TRIP: Sensor offline (Pos at Origin)! Latching forces OFF.");
+        robot->setEndEffForceWithCompensation(VM2::Zero(), false);
+        return;
+    }
+
+    // Guard against physically impossible velocities or disconnected sensor
+    if (dX.norm() > 1.5) {
+        safetyTripped = true;
+        spdlog::error("STANDBY SAFETY TRIP: Speed {:.2f}m/s > 1.5m/s! Latching forces OFF.", dX.norm());
+        robot->setEndEffForceWithCompensation(VM2::Zero(), false);
+        return;
+    }
+
+    if (running() < 3.0) {
+        // First 3 seconds of standby: Completely Limp
         robot->setEndEffForceWithCompensation(VM2::Zero(), true);
-        if (iterations() % 500 == 1) robot->printStatus();
+        if (iterations() % 500 == 1) spdlog::info("Standby (Limp phase): X={:.3f}, Y={:.3f}", X(0), X(1));
     } else {
         if (!isMoving) {
             isMoving = true;
             Xi = X;
             tMoveStart = running();
-            spdlog::info("Standby 5s passed. Auto-moving to Point A...");
+            spdlog::info("Standby 3s passed. Auto-moving to Point A...");
         }
 
         double t_moved = running() - tMoveStart;
@@ -185,6 +200,7 @@ void M2ProbMoveState::entryCode() {
     robot->setEndEffForceWithCompensation(VM2::Zero(), false);
     currentPhase = TO_A;
     finishedFlag = false;
+    safetyTripped = false;
     initToA = true; // will trigger TO_A entry code on first loop
     initTrial = true; // will trigger TRIAL entry code on first loop
     pendingStart  = false; // no start pending at entry
@@ -272,6 +288,7 @@ void M2ProbMoveState::duringCode() {
                     yLockEnabled_ = false;
                     waitLatchEnabled_ = false;
                     rwstAckPending_ = true;
+                    safetyTripped = false;
                     currentPhase = TO_A; // briefly return to TO_A to reset position, then will move back to WAIT_START due to waitLatchEnabled_
                     spdlog::info("TRIAL: RWST received -> TO_A (defer RWOK until WAIT_START at A)");
                 } else if (currentPhase == WAIT_START) {
@@ -295,6 +312,7 @@ void M2ProbMoveState::duringCode() {
                     softWallEnabled = false;
                     yLockEnabled_ = false;
                     waitLatchEnabled_ = false;
+                    safetyTripped = false;
                     currentPhase = TO_A;
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
                     spdlog::info("PHASE {}: TO_A received -> TO_A", (int)currentPhase);
@@ -626,9 +644,22 @@ void M2ProbMoveState::applyForce(const VM2& F) {
     VM2 X_chk  = robot->getEndEffPosition();
     VM2 dX_chk = robot->getEndEffVelocity();
 
+    if (safetyTripped) {
+        robot->setEndEffForceWithCompensation(VM2::Zero(), false);
+        return;
+    }
+
     // SAFETY GUARDIAN: Stop runaway movement due to sensor faults or excessive speed.
+    if (X_chk.norm() < 0.0001) {
+        safetyTripped = true;
+        spdlog::error("PROBMOVE SAFETY TRIP: Sensor offline (Pos at Origin)! Latching forces OFF.");
+        robot->setEndEffForceWithCompensation(VM2::Zero(), false);
+        return;
+    }
+
     if (dX_chk.norm() > 1.5) {
-        spdlog::error("PROBMOVE SAFETY TRIP: Speed {:.2f}m/s > 1.5m/s! Disabling forces.", dX_chk.norm());
+        safetyTripped = true;
+        spdlog::error("PROBMOVE SAFETY TRIP: Speed {:.2f}m/s > 1.5m/s! Latching forces OFF.", dX_chk.norm());
         robot->setEndEffForceWithCompensation(VM2::Zero(), false);
         return;
     }

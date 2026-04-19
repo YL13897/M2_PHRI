@@ -91,6 +91,7 @@ class M2StandbyState : public M2TimedState {
         bool isMoving = false;
         double tMoveStart = 0.0;
         double T_move = 4.0;
+        bool safetyTripped = false;
 };
 
 
@@ -108,6 +109,7 @@ class M2ProbMoveState : public M2TimedState {
         
         // --- Experiment config ---
         VM2 A{0.32, 0.30}; // Target A position (m)
+        bool safetyTripped = false;
         
         // --- Workspace limits and wall config ---
         bool softWallEnabled = false; // only enable walls after reaching A
