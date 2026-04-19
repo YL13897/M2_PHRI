@@ -122,7 +122,7 @@ class M2ProbMoveState : public M2TimedState {
         double epsA_hold  = 0.02;
         double inBandSince = 0.0;
         VM2    Xi;
-        double T_toA  = 2.0;
+        double T_toA  = 4.0;
         double t0_toA = 0.0;
 
         M2MachineHRI* machine = nullptr;

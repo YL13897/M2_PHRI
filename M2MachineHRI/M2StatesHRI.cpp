@@ -360,6 +360,12 @@ void M2ProbMoveState::duringCode() {
             if (initToA) {
                 // Simulate entryCode() for TO_A
                 resetToAPlan(robot->getEndEffPosition());
+                
+                // Sanity check: If encoder reads origin/zero unexpectedly, defer setup
+                if (Xi.norm() < 0.01) {
+                    break; // will retry setup on next loop when/if robot moves away from zero, preventing potential runaway if robot is miscalibrated at origin.
+                }
+                
                 initToA = false;
             }
 
@@ -372,6 +378,13 @@ void M2ProbMoveState::duringCode() {
 
             double k_pos = 4.0;
             F_cmd = impedance(Xd, X, dX, dXd) + k_pos * (Xd - X);
+            
+            // Fade-in force authority over first 0.5s to prevent startup jerk
+            double t_elapsed = running() - t0_toA;
+            if (t_elapsed < 0.5) {
+                F_cmd *= (t_elapsed / 0.5); 
+            }
+            
             applyForce(F_cmd);
 
             // Transition condition check
