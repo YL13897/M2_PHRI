@@ -362,12 +362,6 @@ void M2ProbMoveState::duringCode() {
             if (initToA) {
                 // Simulate entryCode() for TO_A
                 resetToAPlan(robot->getEndEffPosition());
-                
-                // Sanity check: If encoder reads origin/zero unexpectedly, defer setup
-                if (Xi.norm() < 0.01) {
-                    break; // will retry setup on next loop when/if robot moves away from zero, preventing potential runaway if robot is miscalibrated at origin.
-                }
-                
                 initToA = false;
             }
 
