@@ -164,19 +164,25 @@ void M2StandbyState::duringCode() {
         }
 
         double t_moved = running() - tMoveStart;
-        VM2 Xd, dXd;
-        MinJerk(Xi, A, T_move, t_moved, Xd, dXd);
+        VM2 F_cmd;
 
-        Eigen::Matrix2d K = Eigen::Matrix2d::Identity() * 300.0;
-        Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * 15.0;
-        VM2 F_cmd = K * (Xd - X) + D * (dXd - dX);
+        if (t_moved >= T_move) {
+            // Trajectory complete: Seamlessly snap to the stiff holding lock
+            F_cmd = computeHoldForce(X, dX, A);
+            if (iterations() % 500 == 1) spdlog::info("Standby (Holding A): X={:.3f}, Y={:.3f}", X(0), X(1));
+        } else {
+            // Moving: use soft impedance tracker
+            VM2 Xd, dXd;
+            MinJerk(Xi, A, T_move, t_moved, Xd, dXd);
+            Eigen::Matrix2d K = Eigen::Matrix2d::Identity() * 300.0;
+            Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * 15.0;
+            F_cmd = K * (Xd - X) + D * (dXd - dX);
+            if (t_moved < 0.5) F_cmd *= (t_moved / 0.5);
+            if (iterations() % 500 == 1) spdlog::info("Standby Pre-Pos: X={:.3f}, Y={:.3f}", X(0), X(1));
+        }
 
         for (int i = 0; i < 2; ++i) F_cmd(i) = clamp_compat(F_cmd(i), -60.0, 60.0);
-        if (t_moved < 0.5) F_cmd *= (t_moved / 0.5);
-
         robot->setEndEffForceWithCompensation(F_cmd, true);
-        
-        if (iterations() % 500 == 1) spdlog::info("Standby Pre-Pos: X={:.3f}, Y={:.3f}", X(0), X(1));
     }
 }
 
@@ -483,7 +489,7 @@ void M2ProbMoveState::duringCode() {
             if (waitLatchEnabled_) {
                 const VM2 X = robot->getEndEffPosition();
                 const VM2 dX = robot->getEndEffVelocity();
-                const VM2 F_wait = waitLatchK_ * (A - X) - waitLatchD_ * dX;
+                const VM2 F_wait = computeHoldForce(X, dX, A, waitLatchK_, waitLatchD_);
                 applyForce(F_wait);
             } else {
                 applyForce(VM2::Zero());
@@ -676,8 +682,12 @@ void M2ProbMoveState::applyForce(const VM2& F) {
     if (yLockEnabled_) {
         VM2 X  = robot->getEndEffPosition();
         VM2 dX = robot->getEndEffVelocity();
-        const double Fy_lock = -yLockK_ * (X(1) - A(1)) - yLockD_ * dX(1);
-        F_cmd(1) += Fy_lock;
+        // Use Y-components for the 1D lock
+        VM2 posCurrent(0.0, X(1));
+        VM2 velCurrent(0.0, dX(1));
+        VM2 posTarget(0.0, A(1));
+        const VM2 Fy_lock = computeHoldForce(posCurrent, velCurrent, posTarget, yLockK_, yLockD_);
+        F_cmd(1) += Fy_lock(1);
     }
 
     if (softWallEnabled) {

@@ -27,6 +27,11 @@ class M2TimedState : public State {
         // Constructor takes robot pointer and optional name
         M2TimedState(RobotM2 *M2, const char *name = NULL): State(name), robot(M2){};
 
+        // Shared robust position lock command
+        VM2 computeHoldForce(const VM2& currentPos, const VM2& currentVel, const VM2& targetPos, double stiffK = 700.0, double dampD = 40.0) {
+            return stiffK * (targetPos - currentPos) - dampD * currentVel;
+        }
+
     private:
         void entry(void) final {
             std::cout
