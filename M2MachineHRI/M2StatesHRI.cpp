@@ -129,6 +129,7 @@ void M2StandbyState::entryCode() {
 void M2StandbyState::duringCode() {
     VM2 X = robot->getEndEffPosition();
     VM2 dX = robot->getEndEffVelocity();
+    VM2 F_ext = robot->getEndEffForce();
 
     if (safetyTripped) {
         robot->setEndEffForceWithCompensation(VM2::Zero(), false);
@@ -154,7 +155,7 @@ void M2StandbyState::duringCode() {
     if (running() < 3.0) {
         // First 3 seconds of standby: Completely Limp
         robot->setEndEffForceWithCompensation(VM2::Zero(), true);
-        if (iterations() % 500 == 1) spdlog::info("Standby (Limp phase): X={:.3f}, Y={:.3f}", X(0), X(1));
+        if (iterations() % 500 == 1) spdlog::info("Standby (Limp phase): X={:.3f}, Y={:.3f}, Fx={:.2f}, Fy={:.2f}", X(0), X(1), F_ext(0), F_ext(1));
     } else {
         if (!isMoving) {
             isMoving = true;
@@ -169,7 +170,7 @@ void M2StandbyState::duringCode() {
         if (t_moved >= T_move) {
             // Trajectory complete: Seamlessly snap to the stiff holding lock
             F_cmd = computeHoldForce(X, dX, A);
-            if (iterations() % 500 == 1) spdlog::info("Standby (Holding A): X={:.3f}, Y={:.3f}", X(0), X(1));
+            if (iterations() % 500 == 1) spdlog::info("Standby (Holding A): X={:.3f}, Y={:.3f}, Fx={:.2f}, Fy={:.2f}", X(0), X(1), F_ext(0), F_ext(1));
         } else {
             // Moving: use soft impedance tracker
             VM2 Xd, dXd;
@@ -178,7 +179,7 @@ void M2StandbyState::duringCode() {
             Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * 15.0;
             F_cmd = K * (Xd - X) + D * (dXd - dX);
             if (t_moved < 0.5) F_cmd *= (t_moved / 0.5);
-            if (iterations() % 500 == 1) spdlog::info("Standby Pre-Pos: X={:.3f}, Y={:.3f}", X(0), X(1));
+            if (iterations() % 500 == 1) spdlog::info("Standby Pre-Pos: X={:.3f}, Y={:.3f}, Fx={:.2f}, Fy={:.2f}", X(0), X(1), F_ext(0), F_ext(1));
         }
 
         for (int i = 0; i < 2; ++i) F_cmd(i) = clamp_compat(F_cmd(i), -60.0, 60.0);
