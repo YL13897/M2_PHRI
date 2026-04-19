@@ -172,7 +172,9 @@ void M2ProbMoveState::entryCode() {
 // Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL), 
     // feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
 void M2ProbMoveState::duringCode() {
-
+    if (currentPhase == WAIT_START && iterations() % 500 == 1) {
+        robot->printStatus();
+    }
     // === GLOBAL COMMAND DRAIN === (TRBG/RWST/FRC2/DSTR/S_MD/S_CT)
     {
         int guard = 1024; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 1024 commands.
