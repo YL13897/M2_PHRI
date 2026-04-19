@@ -74,7 +74,7 @@ class M2CalibState : public M2TimedState {
         bool calibDone=false;
 };
 
-//  M2StandbyState: Transparent idle (zero commanded force)
+//  M2StandbyState: Transparent idle, then pre-positions to A safely.
 class M2StandbyState : public M2TimedState {
     public:
         M2StandbyState(RobotM2* M2, M2MachineHRI* mach, const char* name = "M2 Standby")
@@ -86,6 +86,11 @@ class M2StandbyState : public M2TimedState {
 
     private:
         M2MachineHRI* machine = nullptr;
+        VM2 A{0.32, 0.30};
+        VM2 Xi;
+        bool isMoving = false;
+        double tMoveStart = 0.0;
+        double T_move = 4.0;
 };
 
 
@@ -118,8 +123,8 @@ class M2ProbMoveState : public M2TimedState {
 
         // --- ToA related variables ---
         bool atA_hold = false;
-        double holdTimeA  = 1;
-        double epsA_hold  = 0.02;
+        double holdTimeA  = 0.5; // Shortened from 1.0s to avoid getting stuck if slightly drifting
+        double epsA_hold  = 0.04; // Increased from 0.02m to 0.04m to accommodate steady-state friction error
         double inBandSince = 0.0;
         VM2    Xi;
         double T_toA  = 4.0;

@@ -117,19 +117,52 @@ void M2CalibState::exitCode() {
 // ----------------------------------------------------------------------------
 // --- M2StandbyState implementation ---
 
-// Enter standby: torque control mode with zero commanded force
+// Enter standby: reset moving flag, wait 5 sec
 void M2StandbyState::entryCode() {
-    spdlog::warn("Entering Standby!");
+    spdlog::warn("Entering Standby! Will hold limp for 5s, then move to A.");
     robot->initTorqueControl();
+    isMoving = false;
 }
 
-// Idle loop: zero commanded force, snapshot kinematics, and periodic status print
+// Idle loop: wait 5 sec at zero force, then min-jerk to point A
 void M2StandbyState::duringCode() {
-    // Commanded force in Standby is zero
-    robot->setEndEffForceWithCompensation(VM2::Zero(), true);
+    VM2 X = robot->getEndEffPosition();
+    VM2 dX = robot->getEndEffVelocity();
 
-    // Periodic status print
-    if (iterations()%500==1) robot->printStatus();
+    // Guard against physically impossible velocities or disconnected sensor
+    if (dX.norm() > 1.5) {
+        if (iterations() % 500 == 1) spdlog::error("STANDBY SAFETY TRIP: Speed {:.2f}m/s > 1.5m/s! Disabling forces.", dX.norm());
+        robot->setEndEffForceWithCompensation(VM2::Zero(), false);
+        return;
+    }
+
+    if (running() < 5.0) {
+        // First 5 seconds of standby: Completely Limp
+        robot->setEndEffForceWithCompensation(VM2::Zero(), true);
+        if (iterations() % 500 == 1) robot->printStatus();
+    } else {
+        if (!isMoving) {
+            isMoving = true;
+            Xi = X;
+            tMoveStart = running();
+            spdlog::info("Standby 5s passed. Auto-moving to Point A...");
+        }
+
+        double t_moved = running() - tMoveStart;
+        VM2 Xd, dXd;
+        MinJerk(Xi, A, T_move, t_moved, Xd, dXd);
+
+        Eigen::Matrix2d K = Eigen::Matrix2d::Identity() * 300.0;
+        Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * 15.0;
+        VM2 F_cmd = K * (Xd - X) + D * (dXd - dX);
+
+        for (int i = 0; i < 2; ++i) F_cmd(i) = clamp_compat(F_cmd(i), -60.0, 60.0);
+        if (t_moved < 0.5) F_cmd *= (t_moved / 0.5);
+
+        robot->setEndEffForceWithCompensation(F_cmd, true);
+        
+        if (iterations() % 500 == 1) spdlog::info("Standby Pre-Pos: X={:.3f}, Y={:.3f}", X(0), X(1));
+    }
 }
 
 // Exit standby: zero force and close CSV
@@ -172,9 +205,6 @@ void M2ProbMoveState::entryCode() {
 // Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL), 
     // feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
 void M2ProbMoveState::duringCode() {
-    if (currentPhase == WAIT_START && iterations() % 500 == 1) {
-        robot->printStatus();
-    }
     // === GLOBAL COMMAND DRAIN === (TRBG/RWST/FRC2/DSTR/S_MD/S_CT)
     {
         int guard = 1024; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 1024 commands.
@@ -592,6 +622,16 @@ void M2ProbMoveState::resetToAPlan(const VM2& Xnow) {
 
 // Apply force command with optional soft wall constraints
 void M2ProbMoveState::applyForce(const VM2& F) {
+
+    VM2 X_chk  = robot->getEndEffPosition();
+    VM2 dX_chk = robot->getEndEffVelocity();
+
+    // SAFETY GUARDIAN: Stop runaway movement due to sensor faults or excessive speed.
+    if (dX_chk.norm() > 1.5) {
+        spdlog::error("PROBMOVE SAFETY TRIP: Speed {:.2f}m/s > 1.5m/s! Disabling forces.", dX_chk.norm());
+        robot->setEndEffForceWithCompensation(VM2::Zero(), false);
+        return;
+    }
 
     // const double x_min = 0.16;   // left boundary (m)
     // const double x_max = 0.48;   // left boundary (m)
