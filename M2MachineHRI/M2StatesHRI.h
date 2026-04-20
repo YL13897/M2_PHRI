@@ -28,7 +28,7 @@ class M2TimedState : public State {
         M2TimedState(RobotM2 *M2, const char *name = NULL): State(name), robot(M2){};
 
         // Shared robust position lock command
-        VM2 computeHoldForce(const VM2& currentPos, const VM2& currentVel, const VM2& targetPos, double stiffK = 700.0, double dampD = 40.0) {
+        VM2 computeHoldForce(const VM2& currentPos, const VM2& currentVel, const VM2& targetPos, double stiffK = 1200.0, double dampD = 40.0) {
             return stiffK * (targetPos - currentPos) - dampD * currentVel;
         }
 
@@ -196,7 +196,7 @@ class M2ProbMoveState : public M2TimedState {
         // WAIT_START latch: after AT_A is achieved, hold around A with a virtual spring-damper.
         // Released when transitioning into TRIAL.
         bool waitLatchEnabled_ = false;
-        double waitLatchK_ = 700.0;
+        double waitLatchK_ = 1200.0;
         double waitLatchD_ = 40.0;
 
         // TRIAL part: scoring and trial end detection
