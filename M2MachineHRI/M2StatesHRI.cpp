@@ -345,12 +345,14 @@ void M2ProbMoveState::duringCode() {
         // ------------------------------------------------------------------------------
 
 
-            // Disturbance active flag from Unity: DSTR [-1/0/+1]
+            // Disturbance active flag and magnitude from Unity: DSTR [val]
             if (cu.rfind("DSTR", 0) == 0) {
                 double disturbanceCmd = a.empty() ? 0.0 : a[0];
-                disturbanceActive_ = std::abs(disturbanceCmd) > 0.5;
+                // Activate if non-zero (since Unity sends the actual force magnitude)
+                disturbanceActive_ = std::abs(disturbanceCmd) > 0.001;
                 disturbanceDirection_ = disturbanceCmd >= 0.0 ? 1.0 : -1.0;
                 if (disturbanceActive_) {
+                    disturbanceForceMagnitude_ = std::abs(disturbanceCmd);
                     disturbanceExpireAt_ = running() + disturbanceAutoOffSec_;
                 } else {
                     disturbanceExpireAt_ = -1.0;
