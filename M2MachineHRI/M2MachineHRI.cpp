@@ -52,6 +52,23 @@ static bool toProbOnBtn(StateMachine& SM){
                 return true;
             }
 
+            // Update Standby K from Unity during Standby
+            if (cu.rfind("STBK", 0) == 0) {
+                if (!v.empty()) {
+                    auto probState = sm.state<M2ProbMoveState>("ProbMoveState");
+                    auto stbyState = sm.state<M2StandbyState>("StandbyState");
+                    if (probState) {
+                        probState->waitLatchK_ = v[0];
+                    }
+                    if (stbyState) {
+                        stbyState->holdK_ = v[0];
+                    }
+                    spdlog::info("Standby K updated to: {}", v[0]);
+                }
+                sm.UIserver->clearCmd();
+                continue;
+            }
+
             // Ignore noisy runtime commands in Standby (not part of Standby protocol).
             if (cu.rfind("FRC2", 0) == 0 || cu.rfind("DSTR", 0) == 0 ||
                 cu.rfind("TRBG", 0) == 0 || cu.rfind("RWST", 0) == 0 ||

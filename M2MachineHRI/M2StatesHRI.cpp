@@ -169,7 +169,7 @@ void M2StandbyState::duringCode() {
 
         if (t_moved >= T_move) {
             // Trajectory complete: Seamlessly snap to the stiff holding lock
-            F_cmd = computeHoldForce(X, dX, A);
+            F_cmd = computeHoldForce(X, dX, A, holdK_);
             if (iterations() % 500 == 1) spdlog::info("Standby (Holding A): X={:.3f}, Y={:.3f}, Fx={:.2f}, Fy={:.2f}", X(0), X(1), F_ext(0), F_ext(1));
         } else {
             // Moving: use soft impedance tracker
@@ -344,6 +344,17 @@ void M2ProbMoveState::duringCode() {
             // }
         // ------------------------------------------------------------------------------
 
+
+            // Dynamic Standby Stiffness
+            if (cu.rfind("STBK", 0) == 0) {
+                if (!a.empty()) {
+                    waitLatchK_ = a[0];
+                    yLockK_ = a[0];
+                    spdlog::info("PHASE {}: Standby K dynamic update to {}", (int)currentPhase, a[0]);
+                }
+                if (machine && machine->UIserver) machine->UIserver->clearCmd();
+                continue;
+            }
 
             // Disturbance active flag and magnitude from Unity: DSTR [val]
             if (cu.rfind("DSTR", 0) == 0) {

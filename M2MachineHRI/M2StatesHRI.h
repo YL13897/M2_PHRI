@@ -89,6 +89,9 @@ class M2StandbyState : public M2TimedState {
         void duringCode() override;
         void exitCode() override;
 
+        // Added dynamic Standby K control
+        double holdK_ = 1200.0;
+
     private:
         M2MachineHRI* machine = nullptr;
         VM2 A{0.32, 0.30};
@@ -127,6 +130,9 @@ class M2ProbMoveState : public M2TimedState {
         // --- User force config ---
         double userForceScale   = 1.0;  // scale factor for user force
         double forceSaturation   = 80.0;
+
+        // --- Dynamic Standby K controls ---
+        double waitLatchK_ = 1200.0;
 
         // --- ToA related variables ---
         bool atA_hold = false;
@@ -190,13 +196,12 @@ class M2ProbMoveState : public M2TimedState {
         double disturbanceExpireAt_ = -1.0;
         // Global Y-lock (enabled after TO_A is completed)
         bool yLockEnabled_ = false;
-        double yLockK_ = 1200.0;
+        double yLockK_ = 1500.0;
         double yLockD_ = 60.0;
 
         // WAIT_START latch: after AT_A is achieved, hold around A with a virtual spring-damper.
         // Released when transitioning into TRIAL.
         bool waitLatchEnabled_ = false;
-        double waitLatchK_ = 1200.0;
         double waitLatchD_ = 40.0;
 
         // TRIAL part: scoring and trial end detection
