@@ -122,7 +122,7 @@ class M2ProbMoveState : public M2TimedState {
         // --- Workspace limits and wall config ---
         bool softWallEnabled = false; // only enable walls after reaching A
         const double x_min = 0.14;   // left boundary (m)
-        const double x_max = 0.50;   // left boundary (m)
+        const double x_max = 0.50;   // right boundary (m)
         const double k_wall = 800.0; // wall stiffness N/m
         const double d_wall = 40.0;  // wall damping N·s/m
         const double y_max = 0.40;   // upper boundary (m)

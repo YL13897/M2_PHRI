@@ -548,7 +548,7 @@ void M2ProbMoveState::duringCode() {
 
             VM2 X = robot->getEndEffPosition();
             VM2 dX = robot->getEndEffVelocity();
-            VM2 F_handle = robot->getEndEffForce();
+            VM2 F_handle = robot-> >getEndEffForce();
             double tTrial = running() - trialStartTime;
 
             VM2 F_internal = VM2::Zero();
@@ -755,7 +755,7 @@ void M2ProbMoveState::openCSV() {
     }
     if (csv.tellp() == 0) {
         // csv << "trial_index,time_trial,sys_time,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort,disturbance_active,disturbance_direction\n";
-        csv << "trial_index,time_trial,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,effort,disturbance_active,disturbance_direction\n";
+        csv << "trial_index,time_trial,pos_x,pos_y,vel_x,vel_y,interaction_fx,interaction_fy,internal_fx,internal_fy,effort,disturbance_active,disturbance_direction\n";
     }
 }
 
