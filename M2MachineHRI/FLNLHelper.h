@@ -87,8 +87,8 @@ class FLNLHelper
             registerState(runningTime);
             registerState(robot.getEndEffPosition());
             registerState(robot.getEndEffVelocity());
-            // registerState(robot.getInteractionForce());
-            registerState(robot.getEndEffForce());
+            registerState(robot.getInteractionForce());
+            // registerState(robot.getEndEffForce());
 
             spdlog::info("Initialised network communication server ({}:{}) for M2 robot (state size: {})", ip, port, stateValues.size());
         }

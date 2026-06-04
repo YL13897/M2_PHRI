@@ -130,6 +130,7 @@ class M2ProbMoveState : public M2TimedState {
         // --- User force config ---
         double userForceScale   = 1.0;  // scale factor for user force
         double forceSaturation   = 80.0;
+        bool trialCsvEnabled_ = true;
 
         // --- Dynamic Standby K controls ---
         double waitLatchK_ = 1200.0;
@@ -150,7 +151,7 @@ class M2ProbMoveState : public M2TimedState {
         VM2 readUserForce();
         void resetToAPlan(const VM2& Xnow);
         void openCSV();
-        void writeCSV(double tTrial, const VM2& pos, const VM2& vel, const VM2& handleForce, const VM2& fInternal, const VM2& fUser, double effort);
+        void writeCSV(double tTrial, const VM2& pos, const VM2& vel, const VM2& interactionForce, const VM2& endEffForce, const VM2& fInternal, const VM2& fUser, double effort);
         void applyForce(const VM2& F);
 
     private:
@@ -261,4 +262,3 @@ class M2ProbMoveState : public M2TimedState {
 };
 
 #endif
-

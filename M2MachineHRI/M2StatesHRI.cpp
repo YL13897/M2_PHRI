@@ -187,7 +187,7 @@ void M2StandbyState::duringCode() {
     }
 }
 
-// Exit standby: zero force and close CSV
+// Exit standby: zero force
 void M2StandbyState::exitCode() {
     robot->setEndEffForceWithCompensation(VM2::Zero());
 }
@@ -548,7 +548,8 @@ void M2ProbMoveState::duringCode() {
 
             VM2 X = robot->getEndEffPosition();
             VM2 dX = robot->getEndEffVelocity();
-            VM2 F_handle = robot-> >getEndEffForce();
+            VM2 F_interaction = robot->getInteractionForce();
+            VM2 F_endeff = robot->getEndEffForce();
             double tTrial = running() - trialStartTime;
 
             VM2 F_internal = VM2::Zero();
@@ -598,7 +599,7 @@ void M2ProbMoveState::duringCode() {
                 break;
             }
 
-            writeCSV(tTrial, X, dX, F_handle, F_internal, F_unity, F_cmd.norm());
+            writeCSV(tTrial, X, dX, F_interaction, F_endeff, F_internal, F_unity, F_cmd.norm());
 
             break;
 
@@ -745,6 +746,7 @@ void M2ProbMoveState::applyForce(const VM2& F) {
 
 // Open logs/M2ProbMove_<session>.csv with header
 void M2ProbMoveState::openCSV() {
+    if (!trialCsvEnabled_) return;
 
     const std::string sid = (machine && !machine->sessionId.empty()) ? machine->sessionId : std::string("UNSET");
     const std::string fname = std::string("logs/M2ProbMove_") + sid + ".csv";
@@ -755,22 +757,22 @@ void M2ProbMoveState::openCSV() {
     }
     if (csv.tellp() == 0) {
         // csv << "trial_index,time_trial,sys_time,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort,disturbance_active,disturbance_direction\n";
-        csv << "trial_index,time_trial,pos_x,pos_y,vel_x,vel_y,interaction_fx,interaction_fy,internal_fx,internal_fy,effort,disturbance_active,disturbance_direction\n";
+        csv << "trial_index,time_trial,pos_x,pos_y,vel_x,vel_y,interaction_fx,interaction_fy,endeffect_fx,endeffect_fy,internal_fx,internal_fy,effort,disturbance_active,disturbance_direction\n";
     }
 }
 
 // Write a row to the ProbMove CSV with current trial data and metadata
 void M2ProbMoveState::writeCSV(double tTrial, const VM2& pos, const VM2& vel,
-    const VM2& handleForce, const VM2& fInternal, const VM2& fUser, double effort) {
+    const VM2& interactionForce, const VM2& endEffForce, const VM2& fInternal, const VM2& fUser, double effort) {
+    if (!trialCsvEnabled_) return;
     if (!csv.is_open()) return;
-    const double sys_t = system_time_sec();
     csv << std::fixed << std::setprecision(6)
         << trialIndex_ << ","
-        // << tTrial << "," << sys_t << ","
         << tTrial << ","
         << pos(0) << "," << pos(1) << ","
         << vel(0) << "," << vel(1) << ","
-        << handleForce(0) << "," << handleForce(1) << ","
+        << interactionForce(0) << "," << interactionForce(1) << ","
+        << endEffForce(0) << "," << endEffForce(1) << ","
         << fInternal(0) << "," << fInternal(1) << ","
         << effort << ","
         << (disturbanceActive_ ? 1 : 0) << ","
