@@ -192,6 +192,8 @@ def fit_emg_force(profile):
         10.0, 1200.0 * stiffness_scale
     )  # Minimum standbyK of 10.0 to ensure some responsiveness even with low EMG-force sensitivity.
 
+    spi_rest = bias
+    spi_ref = bias
     for trial in trials:
         emg_term = float(
             np.dot(
@@ -199,8 +201,23 @@ def fit_emg_force(profile):
                 np.asarray(trial["emg_mean"], dtype=float),
             )
         )
+        spi = float(
+            np.dot(
+                np.abs(np.asarray(weights, dtype=float)),
+                np.asarray(trial["emg_mean"], dtype=float),
+            )
+            + bias
+        )
         trial["emg_term"] = emg_term
         trial["force_pred"] = emg_term + bias
+        trial["spi_pred"] = spi
+        if trial["key"] == "rest":
+            spi_rest = spi
+        if spi > spi_ref:
+            spi_ref = spi
+
+    profile.spi_rest = float(spi_rest)
+    profile.spi_ref = float(max(spi_ref, spi_rest + 1e-6))
 
     return weights, bias, stiffness_scale, standby_k, trials, valid_slots
 

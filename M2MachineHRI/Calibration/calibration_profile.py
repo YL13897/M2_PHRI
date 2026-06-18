@@ -20,6 +20,8 @@ class CalibrationProfile:
     emg_bracing: list = field(default_factory=list)
     emg_force_weights: list = field(default_factory=list)
     emg_force_bias: float = 0.0
+    spi_rest: float = 0.0
+    spi_ref: float = 1.0
     fit_method: str = ""
     fit_slots: list = field(default_factory=list)
     fit_trials: list = field(default_factory=list)
@@ -44,6 +46,8 @@ class CalibrationProfile:
             "emgRef": self.emg_ref,
             "emgForceWeights": self.emg_force_weights,
             "emgForceBias": self.emg_force_bias,
+            "spiRest": self.spi_rest,
+            "spiRef": self.spi_ref,
             "fitMethod": self.fit_method,
             "note": self.note,
         }
@@ -78,6 +82,8 @@ def save_profile(profile, directory, base_id):
         "emg_bracing": profile.emg_bracing,
         "emg_force_weights": profile.emg_force_weights,
         "emg_force_bias": profile.emg_force_bias,
+        "spi_rest": profile.spi_rest,
+        "spi_ref": profile.spi_ref,
         "fit_method": profile.fit_method,
         "fit_slots": profile.fit_slots,
         "fit_trials": profile.fit_trials,
