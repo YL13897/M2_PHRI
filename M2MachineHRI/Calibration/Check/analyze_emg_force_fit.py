@@ -86,7 +86,7 @@ def pick_json_file():
         root = tk.Tk()
         root.withdraw()
         path = filedialog.askopenfilename(
-            title="Select calibration JSON file",
+            title="Select calibration JSON file, e.g. P01_calibration.json (not EmgLogs/EmgDebug CSV)",
             filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
         )
         root.destroy()
@@ -96,15 +96,16 @@ def pick_json_file():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Plot EMG-force calibration fit.")
-    parser.add_argument("json_path", nargs="?", default="", help="Calibration JSON file.")
-    parser.add_argument("--show", action="store_true", help="Show the figure window.")
-    parser.add_argument("--out", default="", help="Output image path. Defaults to JSON stem + _emg_force_fit.png.")
+    parser = argparse.ArgumentParser(
+        description="Plot EMG-force calibration fit from saved calibration JSON, not EMG/debug CSV."
+    )
+    parser.add_argument("json_path", nargs="?", default="", help="Calibration JSON file, e.g. P01_calibration.json.")
+    parser.add_argument("--out", default="", help="Optional output image path.")
     args = parser.parse_args()
 
     json_path = args.json_path or pick_json_file()
     if not json_path:
-        raise SystemExit("No JSON file selected.")
+        raise SystemExit("No calibration JSON file selected. Select a saved *_calibration.json file, not EmgLogs/EmgDebug CSV.")
 
     path = Path(json_path)
     profile = load_profile(path)
@@ -225,15 +226,15 @@ def main():
     fig.suptitle(path.name)
     fig.tight_layout()
 
-    out = Path(args.out) if args.out else path.with_name(path.stem + "_emg_force_fit.png")
-    fig.savefig(out, dpi=200)
-    print(f"Saved: {out}")
+    if args.out:
+        out = Path(args.out)
+        fig.savefig(out, dpi=200)
+        print(f"Saved: {out}")
     if saved_weights:
         print(f"Saved w: {[round(float(w), 6) for w in saved_weights]}, b: {saved_bias:.6f}")
     print(f"Old fit w: {[round(float(w), 6) for w in old_weights]}, b: {old_bias:.6f}")
     print(f"With rest/bracing w: {[round(float(w), 6) for w in new_weights]}, b: {new_bias:.6f}")
-    if args.show:
-        plt.show()
+    plt.show()
 
 
 if __name__ == "__main__":

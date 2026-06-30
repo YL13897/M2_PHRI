@@ -22,11 +22,8 @@ class CalibrationProfile:
     emg_force_bias: float = 0.0
     spi_rest: float = 0.0
     spi_ref: float = 1.0
-    fit_method: str = ""
     fit_slots: list = field(default_factory=list)
     fit_trials: list = field(default_factory=list)
-    disturbance_left: float = 0.0
-    disturbance_right: float = 0.0
     stiffness_scale: float = 0.0
     standbyK: float = 0.0
     note: str = ""
@@ -34,12 +31,10 @@ class CalibrationProfile:
 
     def response(self):
         calib_force = max(self.left_force_ref, self.right_force_ref)
-        disturbance_gain = max(self.disturbance_left, self.disturbance_right)
         return {
             "calibForce": calib_force,
             "standbyK": self.standbyK,
             "emgScale": self.stiffness_scale,
-            "disturbanceGain": disturbance_gain,
             "threshold": 0.0,
             "emgRest": self.emg_rest,
             "emgBracing": self.emg_bracing,
@@ -48,7 +43,6 @@ class CalibrationProfile:
             "emgForceBias": self.emg_force_bias,
             "spiRest": self.spi_rest,
             "spiRef": self.spi_ref,
-            "fitMethod": self.fit_method,
             "note": self.note,
         }
 
@@ -84,11 +78,8 @@ def save_profile(profile, directory, base_id):
         "emg_force_bias": profile.emg_force_bias,
         "spi_rest": profile.spi_rest,
         "spi_ref": profile.spi_ref,
-        "fit_method": profile.fit_method,
         "fit_slots": profile.fit_slots,
         "fit_trials": profile.fit_trials,
-        "disturbance_left": profile.disturbance_left,
-        "disturbance_right": profile.disturbance_right,
         "stiffness_scale": profile.stiffness_scale,
         "standbyK": profile.standbyK,
         "note": profile.note,

@@ -96,6 +96,18 @@ def normalize_emg(emg, rest, ref):
     return np.clip(out, 0.0, 1.0).tolist()
 
 
+def spi_co(u, weights):
+    p = 0.0
+    n = 0.0
+    for ui, wi in zip(u, weights):
+        aw = abs(float(wi))
+        if wi > 0:
+            p += aw * float(ui)
+        elif wi < 0:
+            n += aw * float(ui)
+    return p + n - abs(p - n)
+
+
 def average_force(samples, direction):
     values = []
     for sample in samples:
@@ -192,8 +204,8 @@ def fit_emg_force(profile):
         10.0, 1200.0 * stiffness_scale
     )  # Minimum standbyK of 10.0 to ensure some responsiveness even with low EMG-force sensitivity.
 
-    spi_rest = bias
-    spi_ref = bias
+    spi_rest = 0.0
+    spi_ref = 1e-6
     for trial in trials:
         emg_term = float(
             np.dot(
@@ -208,28 +220,25 @@ def fit_emg_force(profile):
             )
             + bias
         )
+        spi_new = float(spi_co(trial["emg_mean"], weights))
         trial["emg_term"] = emg_term
         trial["force_pred"] = emg_term + bias
         trial["spi_pred"] = spi
         if trial["key"] == "rest":
-            spi_rest = spi
-        if spi > spi_ref:
-            spi_ref = spi
+            spi_rest = spi_new
+
+    bracing_rows = [
+        normalize_emg(slot_emg_values(sample), profile.emg_rest, profile.emg_ref)
+        for sample in profile.raw.get("bracing", [])
+    ]
+    bracing_spi = [spi_co([u[i] for i in valid_slots], weights) for u in bracing_rows if u]
+    if bracing_spi:
+        spi_ref = float(np.percentile(np.asarray(bracing_spi, dtype=float), 80))
 
     profile.spi_rest = float(spi_rest)
     profile.spi_ref = float(max(spi_ref, spi_rest + 1e-6))
 
     return weights, bias, stiffness_scale, standby_k, trials, valid_slots
-
-
-def compute_disturbance(profile):
-    profile.disturbance_left = (
-        0.7 * profile.left_force_ref if profile.left_force_ref > 0 else 0.0
-    )
-    profile.disturbance_right = (
-        0.7 * profile.right_force_ref if profile.right_force_ref > 0 else 0.0
-    )
-
 
 def force_norm(sample, profile, direction):
     scale = profile.left_force_ref if direction < 0 else profile.right_force_ref

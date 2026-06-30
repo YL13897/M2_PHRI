@@ -5,27 +5,6 @@ import threading
 import time
 from pathlib import Path
 
-# ---------------------------- Load sub-modules --------------------------------
-# -------------------------------------------------------------------------------
-# calibration_flow: Manages the state and timing of the calibration process, including countdowns and recording periods.
-# calibration_math: Contains functions for processing EMG and force data, fitting stiffness parameters, and computing disturbances.
-# calibration_profile: Defines the CalibrationProfile data structure and functions for saving/loading profiles.
-# -------------------------------------------------------------------------------
-from calibration_flow import CalibrationFlow
-from calibration_math import (
-    average_force,
-    compute_disturbance,
-    compute_emg_ref,
-    emg_values,
-    fit_emg_force,
-    force_norm,
-    force_value,
-    mean_emg,
-    peak_force,
-    position_norm,
-    robust_emg_peak,
-)
-from calibration_profile import CalibrationProfile, save_profile
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
@@ -40,6 +19,27 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+# ---------------------------- Load sub-modules --------------------------------
+# -------------------------------------------------------------------------------
+# calibration_flow: Manages the state and timing of the calibration process, including countdowns and recording periods.
+# calibration_math: Contains functions for processing EMG and force data and fitting stiffness parameters.
+# calibration_profile: Defines the CalibrationProfile data structure and functions for saving/loading profiles.
+# -------------------------------------------------------------------------------
+from calibration_flow import CalibrationFlow
+from calibration_math import (
+    average_force,
+    compute_emg_ref,
+    emg_values,
+    fit_emg_force,
+    force_norm,
+    force_value,
+    mean_emg,
+    peak_force,
+    position_norm,
+    robust_emg_peak,
+)
+from calibration_profile import CalibrationProfile, save_profile
 
 # -------------------------------------------------------------------------------
 
@@ -172,7 +172,8 @@ class CalibrationApp(QWidget):
         self.tcp = UnityTcpClient(host, port, self.on_sample)
         self.last_sample = {}
         self.result_text = ""
-        self.base_dir = Path(__file__).resolve().parent
+        self.base_dir = Path(__file__).resolve().parent / "CalibrResults"
+        self.base_dir.mkdir(parents=True, exist_ok=True)
         self.levels = (30, 50, 70)
         self.sample_count = 0
         self.last_connect_log = 0.0
@@ -207,6 +208,7 @@ class CalibrationApp(QWidget):
         self.position_label = QLabel("Position: 0.000 m")
         self.emg_label = QLabel("EMG: --")
         self.result_label = QLabel("Result: --")
+        self.result_label.setWordWrap(True)
         self.debug_label = QLabel("TCP: disconnected | M2: false | samples: 0")
         self.display_bar = ParticipantBar()
 
@@ -338,7 +340,10 @@ class CalibrationApp(QWidget):
         if key == "emg_rest":
             self.profile.emg_rest = mean_emg(samples)
             self.profile.note = "EMG rest calibrated."
-            self.result_text = f"EMG rest channels: {len(self.profile.emg_rest)}"
+            self.result_text = "EMG rest: " + ", ".join(
+                f"Ch{i + 1}={value:.6g}"
+                for i, value in enumerate(self.profile.emg_rest)
+            )
         elif key == "left_mvc":
             self.profile.left_force_ref = peak_force(samples, -1)
             self.profile.emg_left_mvc = robust_emg_peak(samples)
@@ -352,7 +357,10 @@ class CalibrationApp(QWidget):
         elif key == "bracing":
             self.profile.emg_bracing = robust_emg_peak(samples)
             self.profile.note = "Bracing MVC calibrated."
-            self.result_text = f"Bracing channels: {len(self.profile.emg_bracing)}"
+            self.result_text = "Bracing: " + ", ".join(
+                f"Ch{i + 1}={value:.6g}"
+                for i, value in enumerate(self.profile.emg_bracing)
+            )
         elif key.startswith("left_"):
             level = key.split("_")[1]
             mean_force = average_force(samples, -1)
@@ -383,17 +391,13 @@ class CalibrationApp(QWidget):
             return
         self.profile.emg_force_weights = weights
         self.profile.emg_force_bias = force_bias
-        self.profile.fit_method = "trial_mean_force_emg_rest_bracing_robust_mvc_p95"
         self.profile.fit_trials = fit_trials
         self.profile.fit_slots = fit_slots
+        # stiffness_scale = sum(abs(w_i)); regression sensitivity, not physical stiffness.
         self.profile.stiffness_scale = stiffness_scale
         self.profile.standbyK = standby_k
-        compute_disturbance(self.profile)
-        self.profile.note = "Stiffness and disturbance fitted."
-        self.result_text = (
-            f"stiffness_scale = {stiffness_scale:.3f}, "
-            f"disturbance L/R = {self.profile.disturbance_left:.3f}/{self.profile.disturbance_right:.3f}"
-        )
+        self.profile.note = "Stiffness fitted."
+        self.result_text = f"stiffness_scale = {stiffness_scale:.3f}"
         self.result_label.setText(f"Result: {self.result_text}")
         self.append_log(self.result_text)
 
@@ -511,4 +515,3 @@ def main():
 # this is a common Python idiom: It prevents code from running unexpectedly when you import a file into another script.
 if __name__ == "__main__":
     main()
-
