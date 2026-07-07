@@ -121,11 +121,12 @@ class M2ProbMoveState : public M2TimedState {
         
         // --- Workspace limits and wall config ---
         bool softWallEnabled = false; // only enable walls after reaching A
-        const double x_min = 0.14;   // left boundary (m)
-        const double x_max = 0.50;   // right boundary (m)
+        const double x_min = 0.14;   // X lower boundary (m)
+        const double x_max = 0.50;   // X upper boundary (m)
+        const double y_min = 0.10;   // Y lower boundary (m)
+        const double y_max = 0.40;   // Y upper boundary (m)
         const double k_wall = 800.0; // wall stiffness N/m
         const double d_wall = 40.0;  // wall damping N·s/m
-        const double y_max = 0.40;   // upper boundary (m)
 
         // --- User force config ---
         double userForceScale   = 1.0;  // scale factor for user force
@@ -195,10 +196,11 @@ class M2ProbMoveState : public M2TimedState {
         // Safety fallback: auto-clear disturbance if DSTR=0 is missed.
         double disturbanceAutoOffSec_ = 0.40; // based on Unity setup: T=L_zone/v_forward = 2 x 10 / 50 = 0.4 s
         double disturbanceExpireAt_ = -1.0;
-        // Global Y-lock (enabled after TO_A is completed)
-        bool yLockEnabled_ = false;
-        double yLockK_ = 1500.0;
-        double yLockD_ = 60.0;
+        // Axis setup: 0 = X Axis, 1 = Y Axis.
+        int activeAxis_ = 1;
+        bool axisLockEnabled_ = false;
+        double axisLockK_ = 1500.0;
+        double axisLockD_ = 60.0;
 
         // WAIT_START latch: after AT_A is achieved, hold around A with a virtual spring-damper.
         // Released when transitioning into TRIAL.

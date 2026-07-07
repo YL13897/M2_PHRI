@@ -218,7 +218,7 @@ void M2ProbMoveState::entryCode() {
     // unityForceCmd_ = VM2::Zero();
     disturbanceActive_ = false;
     disturbanceExpireAt_ = -1.0;
-    yLockEnabled_ = false; // Lock Y movement after reaching A, to encourage strategic planning in X direction
+    axisLockEnabled_ = false;
     waitLatchEnabled_ = false;
     trialIndex_ = 0;
     openCSV();
@@ -292,7 +292,7 @@ void M2ProbMoveState::duringCode() {
                     initToA = true;
                     inBandSince = 0.0;
                     softWallEnabled = false;
-                    yLockEnabled_ = false;
+                    axisLockEnabled_ = false;
                     waitLatchEnabled_ = false;
                     rwstAckPending_ = true;
                     safetyTripped = false;
@@ -317,7 +317,7 @@ void M2ProbMoveState::duringCode() {
                     initToA = true;
                     inBandSince = 0.0;
                     softWallEnabled = false;
-                    yLockEnabled_ = false;
+                    axisLockEnabled_ = false;
                     waitLatchEnabled_ = false;
                     safetyTripped = false;
                     currentPhase = TO_A;
@@ -349,7 +349,7 @@ void M2ProbMoveState::duringCode() {
             if (cu.rfind("STBK", 0) == 0) {
                 if (!a.empty()) {
                     waitLatchK_ = a[0];
-                    yLockK_ = a[0];
+                    axisLockK_ = a[0];
                     spdlog::info("PHASE {}: Standby K dynamic update to {}", (int)currentPhase, a[0]);
                 }
                 if (machine && machine->UIserver) machine->UIserver->clearCmd();
@@ -470,7 +470,7 @@ void M2ProbMoveState::duringCode() {
 
             if (atA_hold) {
                 softWallEnabled = true;
-                yLockEnabled_ = true;
+                axisLockEnabled_ = true;
                 currentPhase = WAIT_START;
                 if (rwstAckPending_) {
                     rwstAckPending_ = false;
@@ -556,17 +556,20 @@ void M2ProbMoveState::duringCode() {
             // VM2 F_unity = unityForceCmd_;
             VM2 F_unity = VM2::Zero();
 
+            const int activeAxis = activeAxis_ == 1 ? 1 : 0;
+            const int lockedAxis = 1 - activeAxis;
+
             // Four-mode framework:
-            // 1. V2_PHRI + V1_POS: implemented (X sync + force, Y locked)
+            // 1. V2_PHRI + V1_POS: implemented
             if (HRIMode_ == V2_PHRI && CtrlMode_ == V1_POS) {
                 // Native pHRI force generation on M2 side: disturbance only when active.
                 F_unity.setZero();
-                if (disturbanceActive_) F_internal(0) += disturbanceDirection_ * disturbanceForceMagnitude_;
+                if (disturbanceActive_) F_internal(activeAxis) += disturbanceDirection_ * disturbanceForceMagnitude_;
             }
-            // 2. V2_PHRI + V2_VEL: implemented (X velocity sync + force, Y locked)
+            // 2. V2_PHRI + V2_VEL: implemented
             else if (HRIMode_ == V2_PHRI && CtrlMode_ == V2_VEL) {
                 F_unity.setZero();
-                if (disturbanceActive_) F_internal(0) += disturbanceDirection_ * disturbanceForceMagnitude_;
+                if (disturbanceActive_) F_internal(activeAxis) += disturbanceDirection_ * disturbanceForceMagnitude_;
             }
             // 3. V1_HRI + V1_POS: framework reserved (to be implemented)
             else if (HRIMode_ == V1_HRI && CtrlMode_ == V1_POS) {
@@ -580,7 +583,7 @@ void M2ProbMoveState::duringCode() {
             }
 
             VM2 F_cmd = F_internal + F_unity;
-            F_cmd(1) = 0.0; // Y force locked, only apply X direction force
+            F_cmd(lockedAxis) = 0.0;
             applyForce(F_cmd);
 
             
@@ -684,52 +687,45 @@ void M2ProbMoveState::applyForce(const VM2& F) {
         robot->setEndEffForceWithCompensation(VM2::Zero(), false);
         return;
     }
-
-    // const double x_min = 0.16;   // left boundary (m)
-    // const double x_max = 0.48;   // left boundary (m)
-    // const double k_wall = 800.0; // wall stiffness N/m
-    // const double d_wall = 40.0;  // wall damping N·s/m
-    // const double y_max = 0.40;   // upper boundary (m)
-
+    const int activeAxis = activeAxis_ == 1 ? 1 : 0;
+    const int lockedAxis = 1 - activeAxis;
     VM2 F_cmd = F;
 
-    // Global Y-lock after TO_A completion: keep Y near A(1)
-    if (yLockEnabled_) {
+    if (axisLockEnabled_) {
         VM2 X  = robot->getEndEffPosition();
         VM2 dX = robot->getEndEffVelocity();
-        // Use Y-components for the 1D lock
-        VM2 posCurrent(0.0, X(1));
-        VM2 velCurrent(0.0, dX(1));
-        VM2 posTarget(0.0, A(1));
-        const VM2 Fy_lock = computeHoldForce(posCurrent, velCurrent, posTarget, yLockK_, yLockD_);
-        F_cmd(1) += Fy_lock(1);
+        VM2 posCurrent = VM2::Zero();
+        VM2 velCurrent = VM2::Zero();
+        VM2 posTarget = VM2::Zero();
+        posCurrent(lockedAxis) = X(lockedAxis);
+        velCurrent(lockedAxis) = dX(lockedAxis);
+        posTarget(lockedAxis) = A(lockedAxis);
+        const VM2 F_lock = computeHoldForce(posCurrent, velCurrent, posTarget, axisLockK_, axisLockD_);
+        F_cmd(lockedAxis) += F_lock(lockedAxis);
     }
 
     if (softWallEnabled) {
-        //  read current position and velocity
         VM2 X  = robot->getEndEffPosition();
         VM2 dX = robot->getEndEffVelocity();
+        const double activeMin = activeAxis == 0 ? x_min : y_min;
+        const double activeMax = activeAxis == 0 ? x_max : y_max;
 
-
-        // left wall
-        if (X(0) < x_min) {
-            double pen = x_min - X(0);
-            double F_wall = k_wall * pen - d_wall * dX(0);
-            if (F_wall > 0.0) F_cmd(0) += F_wall;
-        }
-        // right wall
-        if (X(0) > x_max) {
-            double pen = X(0) - x_max;
-            double F_wall = k_wall * pen + d_wall * dX(0);
-            if (F_wall > 0.0) F_cmd(0) -= F_wall;
+        if (X(activeAxis) < activeMin) {
+            double pen = activeMin - X(activeAxis);
+            double F_wall = k_wall * pen - d_wall * dX(activeAxis);
+            if (F_wall > 0.0) F_cmd(activeAxis) += F_wall;
         }
 
-        // upper wall
-        if (X(1) > y_max) {
-        double penY = X(1) - y_max;   // penetration depth (upper wall)
-            double F_wall_y = k_wall * penY + d_wall * dX(1);  
-            // Only apply when pushing into the wall
-            if (F_wall_y > 0.0) F_cmd(1) -= F_wall_y;   // push downward
+        if (X(activeAxis) > activeMax) {
+            double pen = X(activeAxis) - activeMax;
+            double F_wall = k_wall * pen + d_wall * dX(activeAxis);
+            if (F_wall > 0.0) F_cmd(activeAxis) -= F_wall;
+        }
+
+        if (activeAxis == 0 && X(1) > y_max) {
+            double penY = X(1) - y_max;
+            double F_wall_y = k_wall * penY + d_wall * dX(1);
+            if (F_wall_y > 0.0) F_cmd(1) -= F_wall_y;
         }
     }
 
