@@ -121,6 +121,10 @@ void M2CalibState::exitCode() {
 void M2StandbyState::entryCode() {
     spdlog::warn("Entering Standby! Will hold limp for 3s, then move to A.");
     robot->initTorqueControl();
+    auto probState = machine ? machine->state<M2ProbMoveState>("ProbMoveState") : nullptr;
+    const int activeAxis = (probState && probState->activeAxis_ == 0) ? 0 : 1;
+    A = (activeAxis == 0) ? VM2{0.32, 0.30} : VM2{0.50, 0.25};
+    spdlog::info("Standby target A set to ({:.3f}, {:.3f}) for activeAxis={}", A(0), A(1), activeAxis);
     isMoving = false;
     safetyTripped = false; // reset safety trip on entry; will be set if excessive speed detected during standby
 }
@@ -205,6 +209,8 @@ void M2ProbMoveState::entryCode() {
 
     robot->initTorqueControl();
     robot->setEndEffForceWithCompensation(VM2::Zero(), false);
+    A = (activeAxis_ == 0) ? VM2{0.32, 0.30} : VM2{0.50, 0.25};
+    spdlog::info("ProbMove target A set to ({:.3f}, {:.3f}) for activeAxis={}", A(0), A(1), activeAxis_);
     currentPhase = TO_A;
     finishedFlag = false;
     safetyTripped = false;

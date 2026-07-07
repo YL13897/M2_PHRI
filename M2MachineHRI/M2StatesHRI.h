@@ -117,6 +117,7 @@ class M2ProbMoveState : public M2TimedState {
         
         // --- Experiment config ---
         VM2 A{0.32, 0.30}; // Target A position (m)
+        int activeAxis_ = 1; // 0 = X Axis, 1 = Y Axis.
         bool safetyTripped = false;
         
         // --- Workspace limits and wall config ---
@@ -196,8 +197,7 @@ class M2ProbMoveState : public M2TimedState {
         // Safety fallback: auto-clear disturbance if DSTR=0 is missed.
         double disturbanceAutoOffSec_ = 0.40; // based on Unity setup: T=L_zone/v_forward = 2 x 10 / 50 = 0.4 s
         double disturbanceExpireAt_ = -1.0;
-        // Axis setup: 0 = X Axis, 1 = Y Axis.
-        int activeAxis_ = 1;
+        // Axis lock setup.
         bool axisLockEnabled_ = false;
         double axisLockK_ = 1500.0;
         double axisLockD_ = 60.0;
