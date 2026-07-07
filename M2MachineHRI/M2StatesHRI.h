@@ -117,7 +117,7 @@ class M2ProbMoveState : public M2TimedState {
         
         // --- Experiment config ---
         VM2 A{0.32, 0.30}; // Target A position (m)
-        int activeAxis_ = 1; // 0 = X Axis, 1 = Y Axis.
+        int activeAxis_ = 0; // 0 = X Axis, 1 = Y Axis.
         bool safetyTripped = false;
         
         // --- Workspace limits and wall config ---
