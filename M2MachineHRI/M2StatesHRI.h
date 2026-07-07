@@ -116,7 +116,8 @@ class M2ProbMoveState : public M2TimedState {
         bool isFinished() const { return finishedFlag; }
         
         // --- Experiment config ---
-        VM2 A{0.32, 0.25}; // Target A position (m)
+        VM2 A{0.32, 0.20}; // Target A position (m) - X-Axis
+        // VM2 A{0.50, 0.25}; // Target A position (m) - Y-Axis
         int activeAxis_ = 0; // 0 = X Axis, 1 = Y Axis.
         bool safetyTripped = false;
         
