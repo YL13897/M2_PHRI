@@ -53,6 +53,14 @@ static inline double MinJerk(const VM2& X0, const VM2& Xf, double T, double t,
     return s;
 }
 
+static inline VM2 myVE(const VM2& dX, const VM2& Fm, double B, double M, double dt) {
+    const double denom = M + B * dt;
+    if (denom <= std::numeric_limits<double>::epsilon()) {
+        return VM2::Zero();
+    }
+    return (Fm * dt + M * dX) / denom;
+}
+
 // Simple clamp helper
 template <typename T>
 static inline T clamp_compat(T v, T lo, T hi) {
@@ -264,6 +272,7 @@ void M2ProbMoveState::entryCode() {
     disturbanceExpireAt_ = -1.0;
     axisLockEnabled_ = false;
     waitLatchEnabled_ = false;
+    admittanceActive_ = false;
     trialIndex_ = 0;
     openCSV();
 
@@ -327,6 +336,7 @@ void M2ProbMoveState::duringCode() {
             // Manual return to WAIT_START from TRIAL for quick reconfiguration.
             if (cu.rfind("RWST", 0) == 0) {
                 if (currentPhase == TRIAL) {
+                    stopAdmittance();
                     // unityForceCmd_.setZero();
                     if (machine && machine->UIserver) {
                         machine->UIserver->sendCmd("TRND");
@@ -475,6 +485,7 @@ void M2ProbMoveState::duringCode() {
             // Emergency stop: finish ProbMove and return Standby via top-level transition
             if (cu.rfind("SESS",0)==0) {
                 // unityForceCmd_.setZero();
+                stopAdmittance();
                 waitLatchEnabled_ = false;
                 finishedFlag = true;
                 spdlog::info("SESS received: finish ProbMove and return Standby");
@@ -658,7 +669,54 @@ void M2ProbMoveState::duringCode() {
 
             VM2 F_cmd = F_internal + F_unity;
             F_cmd(lockedAxis) = 0.0;
-            applyForce(F_cmd);
+            double cmdEffort = F_cmd.norm();
+
+            if (useAdmittance) {
+                startAdmittance();
+
+                if (safetyTripped) {
+                    robot->setEndEffVelocity(VM2::Zero());
+                    cmdEffort = 0.0;
+                } else if (X.norm() < 0.0001) {
+                    safetyTripped = true;
+                    spdlog::error("PROBMOVE SAFETY TRIP: Sensor offline (Pos at Origin)! Latching velocity OFF.");
+                    robot->setEndEffVelocity(VM2::Zero());
+                    cmdEffort = 0.0;
+                } else if (dX.norm() > 1.5) {
+                    safetyTripped = true;
+                    spdlog::error("PROBMOVE SAFETY TRIP: Speed {:.2f}m/s > 1.5m/s! Latching velocity OFF.", dX.norm());
+                    robot->setEndEffVelocity(VM2::Zero());
+                    cmdEffort = 0.0;
+                } else {
+                    VM2 Fs = F_interaction + F_cmd;
+                    VM2 Vd = myVE(dX, Fs, admB, admM, dt());
+                    Vd(lockedAxis) = 0.0;
+
+                    const double velLimit = std::abs(admVelLimit);
+                    if (velLimit > 0.0) {
+                        for (int i = 0; i < 2; ++i) {
+                            Vd(i) = clamp_compat(Vd(i), -velLimit, velLimit);
+                        }
+                    }
+                    if (softWallEnabled) {
+                        if (X(activeAxis) < wallMin_ && Vd(activeAxis) < 0.0) Vd(activeAxis) = 0.0;
+                        if (X(activeAxis) > wallMax_ && Vd(activeAxis) > 0.0) Vd(activeAxis) = 0.0;
+                    }
+
+                    if (!std::isfinite(Vd(0)) || !std::isfinite(Vd(1))) {
+                        safetyTripped = true;
+                        spdlog::error("PROBMOVE SAFETY TRIP: Admittance velocity is not finite. Latching velocity OFF.");
+                        robot->setEndEffVelocity(VM2::Zero());
+                        cmdEffort = 0.0;
+                    } else {
+                        robot->setEndEffVelocity(Vd);
+                        cmdEffort = Vd.norm();
+                    }
+                }
+            } else {
+                stopAdmittance();
+                applyForce(F_cmd);
+            }
 
             
             if (tTrial >= trialDurationSec) {
@@ -667,6 +725,7 @@ void M2ProbMoveState::duringCode() {
                     spdlog::info("Log: TRND (tTrial={:.3f}s)", tTrial);
                 }
                 // unityForceCmd_.setZero();
+                stopAdmittance();
                 pendingStart = false;
                 initTrial = true;
                 waitLatchEnabled_ = false;
@@ -676,7 +735,7 @@ void M2ProbMoveState::duringCode() {
                 break;
             }
 
-            writeCSV(tTrial, X, dX, F_interaction, F_endeff, F_internal, F_unity, F_cmd.norm());
+            writeCSV(tTrial, X, dX, F_interaction, F_endeff, F_internal, F_unity, cmdEffort);
 
             break;
 
@@ -688,6 +747,7 @@ void M2ProbMoveState::duringCode() {
 // Cleanup on ProbMove exit: zero forces, close CSVs, send session summary
 void M2ProbMoveState::exitCode() {
     // unityForceCmd_ = VM2::Zero();
+    stopAdmittance();
     waitLatchEnabled_ = false;
     robot->setEndEffForceWithCompensation(VM2::Zero());
     if (csv.is_open()) csv.close();
@@ -809,6 +869,20 @@ void M2ProbMoveState::applyForce(const VM2& F) {
         F_cmd(i) = clamp_compat(F_cmd(i), -forceSaturation, forceSaturation);
 
     robot->setEndEffForceWithCompensation(F_cmd, true);
+}
+
+void M2ProbMoveState::startAdmittance() {
+    if (admittanceActive_) return;
+    robot->initVelocityControl();
+    robot->setEndEffVelocity(VM2::Zero());
+    admittanceActive_ = true;
+}
+
+void M2ProbMoveState::stopAdmittance() {
+    if (!admittanceActive_) return;
+    robot->setEndEffVelocity(VM2::Zero());
+    robot->initTorqueControl();
+    admittanceActive_ = false;
 }
 
 

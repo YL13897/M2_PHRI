@@ -137,6 +137,12 @@ class M2ProbMoveState : public M2TimedState {
         // --- Dynamic Standby K controls ---
         double waitLatchK_ = 1200.0;
 
+        // --- Trial admittance debug mode for current V2_PHRI + V1_POS path ---
+        bool useAdmittance = true; // if true, use admittance control in TRIAL phase; else, transparent mode with only friction compensation.
+        double admM = 0.8;
+        double admB = 5.0;
+        double admVelLimit = 0.4;
+
         // --- ToA related variables ---
         bool atA_hold = false;
         double holdTimeA  = 0.5; // Shortened from 1.0s to avoid getting stuck if slightly drifting
@@ -157,6 +163,9 @@ class M2ProbMoveState : public M2TimedState {
         void applyForce(const VM2& F);
 
     private:
+        void startAdmittance();
+        void stopAdmittance();
+
         // Enum for internal state management
         enum Phase {
             TO_A,
@@ -173,6 +182,7 @@ class M2ProbMoveState : public M2TimedState {
         // Flags to simulate entryCode() for each phase
         bool initToA = true;
         bool initTrial = true;
+        bool admittanceActive_ = false;
         bool pendingStart = false;  // captured TRBG; consumed only in WAIT_START
         bool rwstAckPending_ = false; // defer RWOK until TO_A has reached A and entered WAIT_START
         
