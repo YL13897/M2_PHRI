@@ -68,11 +68,11 @@ static inline VM2 axis_A(int axisMode) {
 }
 
 static inline double axis_wall_min(int axisMode) {
-    return axis_mode(axisMode) == 1 ? 0.08 : 0.14;
+    return axis_mode(axisMode) == 1 ? 0.12 : 0.20;
 }
 
 static inline double axis_wall_max(int axisMode) {
-    return axis_mode(axisMode) == 1 ? 0.42 : 0.50;
+    return axis_mode(axisMode) == 1 ? 0.38 : 0.44;
 }
 
 
