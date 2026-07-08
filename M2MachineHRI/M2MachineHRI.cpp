@@ -44,6 +44,23 @@ static bool toProbOnBtn(StateMachine& SM){
             std::string cu = trim(cmd);
             std::transform(cu.begin(), cu.end(), cu.begin(), [](unsigned char ch){ return std::toupper(ch); });
 
+            if (cu.rfind("S_AX", 0) == 0) {
+                if (!v.empty()) {
+                    int axisMode = v[0] >= 0.5 ? 1 : 0;
+                    auto probState = sm.state<M2ProbMoveState>("ProbMoveState");
+                    auto stbyState = sm.state<M2StandbyState>("StandbyState");
+                    if (probState) probState->ApplyAxisMode(axisMode);
+                    if (stbyState) stbyState->ApplyAxisMode(axisMode);
+                    sm.UIserver->sendCmd(std::string("OK"));
+                    spdlog::info("Standby axis mode updated to: {}", axisMode);
+                } else {
+                    sm.UIserver->sendCmd(std::string("BUSY"));
+                    spdlog::warn("S_AX missing axis argument in Standby");
+                }
+                sm.UIserver->clearCmd();
+                continue;
+            }
+
             // If "BGIN" command received, clear it and transition to ProbMove
             if (cu.rfind("BGIN", 0) == 0) {
                 sm.UIserver->clearCmd();

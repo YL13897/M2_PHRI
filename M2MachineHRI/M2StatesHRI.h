@@ -88,13 +88,14 @@ class M2StandbyState : public M2TimedState {
         void entryCode() override;
         void duringCode() override;
         void exitCode() override;
+        bool ApplyAxisMode(int axisMode);
 
         // Added dynamic Standby K control
         double holdK_ = 1200.0;
 
     private:
         M2MachineHRI* machine = nullptr;
-        VM2 A{0.32, 0.30};
+        VM2 A{0.32, 0.20}; // Runtime target A; default X, changed by ApplyAxisMode().
         VM2 Xi;
         bool isMoving = false;
         double tMoveStart = 0.0;
@@ -114,19 +115,17 @@ class M2ProbMoveState : public M2TimedState {
         void exitCode() override;
 
         bool isFinished() const { return finishedFlag; }
+        bool ApplyAxisMode(int axisMode);
         
         // --- Experiment config ---
-        VM2 A{0.32, 0.20}; // Target A position (m) - X-Axis
-        // VM2 A{0.50, 0.25}; // Target A position (m) - Y-Axis
+        VM2 A{0.32, 0.20}; // Target A position (m), selected by axis mode.
         int activeAxis_ = 0; // 0 = X Axis, 1 = Y Axis.
         bool safetyTripped = false;
         
         // --- Workspace limits and wall config ---
         bool softWallEnabled = false; // only enable walls after reaching A
-        const double x_min = 0.14;   // X lower boundary (m)
-        const double x_max = 0.50;   // X upper boundary (m)
-        const double y_min = 0.10;   // Y lower boundary (m)
-        const double y_max = 0.40;   // Y upper boundary (m)
+        double wallMin_ = 0.14; // Runtime wall min; default X.
+        double wallMax_ = 0.50; // Runtime wall max; default X.
         const double k_wall = 800.0; // wall stiffness N/m
         const double d_wall = 40.0;  // wall damping N·s/m
 

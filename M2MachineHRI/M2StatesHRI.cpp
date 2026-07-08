@@ -59,6 +59,22 @@ static inline T clamp_compat(T v, T lo, T hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
 }
 
+static inline int axis_mode(int axisMode) {
+    return axisMode == 1 ? 1 : 0;
+}
+
+static inline VM2 axis_A(int axisMode) {
+    return axis_mode(axisMode) == 1 ? VM2(0.50, 0.25) : VM2(0.32, 0.20);
+}
+
+static inline double axis_wall_min(int axisMode) {
+    return axis_mode(axisMode) == 1 ? 0.08 : 0.14;
+}
+
+static inline double axis_wall_max(int axisMode) {
+    return axis_mode(axisMode) == 1 ? 0.42 : 0.50;
+}
+
 
 // ----------------------------------------------------------------------------
 // --- M2CalibState implementation ---
@@ -155,8 +171,8 @@ void M2StandbyState::duringCode() {
         return;
     }
 
-    if (running() < 3.0) {
-        // First 3 seconds of standby: Completely Limp
+    if (running() < 2.0) {
+        // First 2 seconds of standby: Completely Limp
         robot->setEndEffForceWithCompensation(VM2::Zero(), true);
         if (iterations() % 500 == 1) spdlog::info("Standby (Limp phase): X={:.3f}, Y={:.3f}, Fx={:.2f}, Fy={:.2f}", X(0), X(1), F_ext(0), F_ext(1));
     } else {
@@ -164,7 +180,7 @@ void M2StandbyState::duringCode() {
             isMoving = true;
             Xi = X;
             tMoveStart = running();
-            spdlog::info("Standby 3s passed. Auto-moving to Point A...");
+            spdlog::info("Standby 2s passed. Auto-moving to Point A...");
         }
 
         double t_moved = running() - tMoveStart;
@@ -195,6 +211,17 @@ void M2StandbyState::exitCode() {
     robot->setEndEffForceWithCompensation(VM2::Zero());
 }
 
+bool M2StandbyState::ApplyAxisMode(int axisMode) {
+    const VM2 nextA = axis_A(axisMode);
+    const bool changed = (A - nextA).norm() > 1e-9;
+    if (changed) {
+        A = nextA;
+        isMoving = false;
+        safetyTripped = false;
+    }
+    return changed;
+}
+
 
 // ----------------------------------------------------------------------------
 // --- M2ProbMoveState implementation ---
@@ -202,6 +229,19 @@ void M2StandbyState::exitCode() {
 // Construct probabilistic move state; machine is used for UI/session utilities
 M2ProbMoveState::M2ProbMoveState(RobotM2* M2, M2MachineHRI* mach, const char* name)
     : M2TimedState(M2, name), machine(mach) {}
+
+bool M2ProbMoveState::ApplyAxisMode(int axisMode) {
+    const int nextAxis = axis_mode(axisMode);
+    const VM2 nextA = axis_A(nextAxis);
+    const bool changed = activeAxis_ != nextAxis || (A - nextA).norm() > 1e-9;
+
+    activeAxis_ = nextAxis;
+    A = nextA;
+    wallMin_ = axis_wall_min(nextAxis);
+    wallMax_ = axis_wall_max(nextAxis);
+
+    return changed;
+}
 
 // Initialize ProbMove: torque mode, reset flags, open CSVs, load perturbations
 void M2ProbMoveState::entryCode() {
@@ -232,7 +272,7 @@ void M2ProbMoveState::entryCode() {
 // Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL), 
     // feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
 void M2ProbMoveState::duringCode() {
-    // === GLOBAL COMMAND DRAIN === (TRBG/RWST/FRC2/DSTR/S_MD/S_CT)
+    // === GLOBAL COMMAND DRAIN === (TRBG/RWST/FRC2/DSTR/S_AX/S_MD/S_CT)
     {
         int guard = 1024; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 1024 commands.
         while (guard-- > 0 && machine && machine->UIserver && machine->UIserver->isCmd()) {
@@ -376,6 +416,36 @@ void M2ProbMoveState::duringCode() {
                 machine->UIserver->clearCmd();
                 continue;
             }
+
+            // Axis setting command from Unity: S_AX [0=X, 1=Y].
+            if (cu.rfind("S_AX",0)==0) {
+                if (currentPhase != TRIAL && !a.empty()) {
+                    int axisMode = (int)std::round(a[0]);
+                    bool changed = ApplyAxisMode(axisMode);
+                    auto stbyState = machine ? machine->state<M2StandbyState>("StandbyState") : nullptr;
+                    if (stbyState) {
+                        stbyState->ApplyAxisMode(axisMode);
+                    }
+                    if (changed) {
+                        pendingStart = false;
+                        initToA = true;
+                        inBandSince = 0.0;
+                        softWallEnabled = false;
+                        axisLockEnabled_ = false;
+                        waitLatchEnabled_ = false;
+                        safetyTripped = false;
+                        currentPhase = TO_A;
+                    }
+                    spdlog::info("PHASE {}: S_AX -> axis={}", (int)currentPhase, activeAxis_);
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
+                } else {
+                    if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
+                    spdlog::warn("PARAM LOCKED: '{}' rejected (phase={}, only WAIT_START/TO_A allowed)", cu, (int)currentPhase);
+                }
+                machine->UIserver->clearCmd();
+                continue;
+            }
+
             // Handle mode setting commands (S_MD, S_CT) in WAIT_START/TO_A
             if (cu.rfind("S_MD",0)==0 || cu.rfind("S_CT",0)==0) {
                 if (currentPhase != TRIAL) {
@@ -711,8 +781,8 @@ void M2ProbMoveState::applyForce(const VM2& F) {
     if (softWallEnabled) {
         VM2 X  = robot->getEndEffPosition();
         VM2 dX = robot->getEndEffVelocity();
-        const double activeMin = activeAxis == 0 ? x_min : y_min;
-        const double activeMax = activeAxis == 0 ? x_max : y_max;
+        const double activeMin = wallMin_;
+        const double activeMax = wallMax_;
 
         if (X(activeAxis) < activeMin) {
             double pen = activeMin - X(activeAxis);
@@ -726,8 +796,9 @@ void M2ProbMoveState::applyForce(const VM2& F) {
             if (F_wall > 0.0) F_cmd(activeAxis) -= F_wall;
         }
 
-        if (activeAxis == 0 && X(1) > y_max) {
-            double penY = X(1) - y_max;
+        const double yWallMax = axis_wall_max(1);
+        if (activeAxis == 0 && X(1) > yWallMax) {
+            double penY = X(1) - yWallMax;
             double F_wall_y = k_wall * penY + d_wall * dX(1);
             if (F_wall_y > 0.0) F_cmd(1) -= F_wall_y;
         }
