@@ -432,6 +432,9 @@ void M2ProbMoveState::duringCode() {
                 if (currentPhase != TRIAL && !a.empty()) {
                     int axisMode = (int)std::round(a[0]);
                     bool changed = ApplyAxisMode(axisMode);
+                    if (a.size() >= 2) {
+                        useAdmittance = std::round(a[1]) != 0;
+                    }
                     auto stbyState = machine ? machine->state<M2StandbyState>("StandbyState") : nullptr;
                     if (stbyState) {
                         stbyState->ApplyAxisMode(axisMode);
@@ -446,7 +449,7 @@ void M2ProbMoveState::duringCode() {
                         safetyTripped = false;
                         currentPhase = TO_A;
                     }
-                    spdlog::info("PHASE {}: S_AX -> axis={}", (int)currentPhase, activeAxis_);
+                    spdlog::info("PHASE {}: S_AX -> axis={}, admittance={}", (int)currentPhase, activeAxis_, useAdmittance);
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
                 } else {
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
