@@ -142,6 +142,8 @@ class M2ProbMoveState : public M2TimedState {
         double admM = 0.8;
         double admB = 5.0;
         double admVelLimit = 0.4;
+        double admLockK = 2.0;
+        double admLockD = 0.2;
 
         // --- ToA related variables ---
         bool atA_hold = false;

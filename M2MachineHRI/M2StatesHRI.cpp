@@ -614,6 +614,7 @@ void M2ProbMoveState::duringCode() {
             if (initTrial) {
                 // Simulate entryCode() for TRIAL
                 trialStartTime = running();
+                safetyTripped = false;
                 // effortIntegral = 0.0;
                 // rawEffortIntegral = 0.0;
                 ++trialIndex_;
@@ -689,8 +690,10 @@ void M2ProbMoveState::duringCode() {
                     cmdEffort = 0.0;
                 } else {
                     VM2 Fs = F_interaction + F_cmd;
-                    VM2 Vd = myVE(dX, Fs, admB, admM, dt());
-                    Vd(lockedAxis) = 0.0;
+                    VM2 Vadm = myVE(dX, Fs, admB, admM, dt());
+                    VM2 Vd = VM2::Zero();
+                    Vd(activeAxis) = Vadm(activeAxis);
+                    Vd(lockedAxis) = admLockK * (A(lockedAxis) - X(lockedAxis)) - admLockD * dX(lockedAxis);
 
                     const double velLimit = std::abs(admVelLimit);
                     if (velLimit > 0.0) {
