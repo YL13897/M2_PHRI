@@ -54,6 +54,25 @@ static inline double MinJerk(const VM2& X0, const VM2& Xf, double T, double t,
 }
 
 static inline VM2 myVE(const VM2& dX, const VM2& Fm, double B, double M, double dt) {
+    /* 
+    Admittance model:
+    M * dv/dt + B * v = Fm
+    
+    Backward Euler discretisation:
+    M * (v_{k+1} - v_k) / dt + B * v_{k+1} = Fm
+    
+    Rearrange:
+    M * v_{k+1} - M * v_k + B * dt * v_{k+1} = Fm * dt
+    (M + B * dt) * v_{k+1} = Fm * dt + M * v_k
+    
+    Therefore:
+    v_{k+1} = (Fm * dt + M * v_k) / (M + B * dt)
+    
+    Here:
+    dX = v_k, previous velocity
+    return value = v_{k+1}, new velocity command
+    */
+   
     const double denom = M + B * dt;
     if (denom <= std::numeric_limits<double>::epsilon()) {
         return VM2::Zero();
