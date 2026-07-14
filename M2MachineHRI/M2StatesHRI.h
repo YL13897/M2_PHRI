@@ -89,6 +89,7 @@ class M2StandbyState : public M2TimedState {
         void duringCode() override;
         void exitCode() override;
         bool ApplyAxisMode(int axisMode);
+        bool ApplyAxisMode(int axisMode, double lockedA);
 
         // Added dynamic Standby K control
         double holdK_ = 1200.0;
@@ -116,6 +117,7 @@ class M2ProbMoveState : public M2TimedState {
 
         bool isFinished() const { return finishedFlag; }
         bool ApplyAxisMode(int axisMode);
+        bool ApplyAxisMode(int axisMode, double lockedA);
         
         // --- Experiment config ---
         VM2 A{0.32, 0.20}; // Target A position (m), selected by axis mode.

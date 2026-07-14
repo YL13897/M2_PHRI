@@ -102,6 +102,13 @@ static inline double axis_wall_max(int axisMode) {
     return axis_mode(axisMode) == 1 ? 0.38 : 0.44;
 }
 
+static inline VM2 axis_A(int axisMode, double lockedA) {
+    VM2 a = axis_A(axisMode);
+    const int lockedAxis = 1 - axis_mode(axisMode);
+    a(lockedAxis) = clamp_compat(lockedA, axis_wall_min(lockedAxis), axis_wall_max(lockedAxis));
+    return a;
+}
+
 
 // ----------------------------------------------------------------------------
 // --- M2CalibState implementation ---
@@ -249,6 +256,17 @@ bool M2StandbyState::ApplyAxisMode(int axisMode) {
     return changed;
 }
 
+bool M2StandbyState::ApplyAxisMode(int axisMode, double lockedA) {
+    const VM2 nextA = axis_A(axisMode, lockedA);
+    const bool changed = (A - nextA).norm() > 1e-9;
+    if (changed) {
+        A = nextA;
+        isMoving = false;
+        safetyTripped = false;
+    }
+    return changed;
+}
+
 
 // ----------------------------------------------------------------------------
 // --- M2ProbMoveState implementation ---
@@ -260,6 +278,19 @@ M2ProbMoveState::M2ProbMoveState(RobotM2* M2, M2MachineHRI* mach, const char* na
 bool M2ProbMoveState::ApplyAxisMode(int axisMode) {
     const int nextAxis = axis_mode(axisMode);
     const VM2 nextA = axis_A(nextAxis);
+    const bool changed = activeAxis_ != nextAxis || (A - nextA).norm() > 1e-9;
+
+    activeAxis_ = nextAxis;
+    A = nextA;
+    wallMin_ = axis_wall_min(nextAxis);
+    wallMax_ = axis_wall_max(nextAxis);
+
+    return changed;
+}
+
+bool M2ProbMoveState::ApplyAxisMode(int axisMode, double lockedA) {
+    const int nextAxis = axis_mode(axisMode);
+    const VM2 nextA = axis_A(nextAxis, lockedA);
     const bool changed = activeAxis_ != nextAxis || (A - nextA).norm() > 1e-9;
 
     activeAxis_ = nextAxis;
@@ -446,17 +477,18 @@ void M2ProbMoveState::duringCode() {
                 continue;
             }
 
-            // Axis setting command from Unity: S_AX [0=X, 1=Y].
+            // Axis setting command from Unity: S_AX [axis (0=X, 1=Y), admittance mode, optional locked-axis A].
             if (cu.rfind("S_AX",0)==0) {
                 if (currentPhase != TRIAL && !a.empty()) {
                     int axisMode = (int)std::round(a[0]);
-                    bool changed = ApplyAxisMode(axisMode);
+                    bool changed = a.size() >= 3 ? ApplyAxisMode(axisMode, a[2]) : ApplyAxisMode(axisMode);
                     if (a.size() >= 2) {
                         useAdmittance = std::round(a[1]) != 0;
                     }
                     auto stbyState = machine ? machine->state<M2StandbyState>("StandbyState") : nullptr;
                     if (stbyState) {
-                        stbyState->ApplyAxisMode(axisMode);
+                        if (a.size() >= 3) stbyState->ApplyAxisMode(axisMode, a[2]);
+                        else stbyState->ApplyAxisMode(axisMode);
                     }
                     if (changed) {
                         pendingStart = false;
@@ -468,7 +500,7 @@ void M2ProbMoveState::duringCode() {
                         safetyTripped = false;
                         currentPhase = TO_A;
                     }
-                    spdlog::info("PHASE {}: S_AX -> axis={}, admittance={}", (int)currentPhase, activeAxis_, useAdmittance);
+                    spdlog::info("PHASE {}: S_AX -> axis={}, admittance={}, A=({:.3f}, {:.3f})", (int)currentPhase, activeAxis_, useAdmittance, A(0), A(1));
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
                 } else {
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");

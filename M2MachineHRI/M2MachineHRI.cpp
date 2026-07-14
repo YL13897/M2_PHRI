@@ -50,12 +50,16 @@ static bool toProbOnBtn(StateMachine& SM){
                     auto probState = sm.state<M2ProbMoveState>("ProbMoveState");
                     auto stbyState = sm.state<M2StandbyState>("StandbyState");
                     if (probState) {
-                        probState->ApplyAxisMode(axisMode);
+                        if (v.size() >= 3) probState->ApplyAxisMode(axisMode, v[2]);
+                        else probState->ApplyAxisMode(axisMode);
                         if (v.size() >= 2) probState->useAdmittance = v[1] >= 0.5;
                     }
-                    if (stbyState) stbyState->ApplyAxisMode(axisMode);
+                    if (stbyState) {
+                        if (v.size() >= 3) stbyState->ApplyAxisMode(axisMode, v[2]);
+                        else stbyState->ApplyAxisMode(axisMode);
+                    }
                     sm.UIserver->sendCmd(std::string("OK"));
-                    spdlog::info("Standby axis mode updated to: {}, admittance={}", axisMode, probState ? probState->useAdmittance : false);
+                    spdlog::info("Standby axis mode updated to: {}, admittance={}, A=({:.3f}, {:.3f})", axisMode, probState ? probState->useAdmittance : false, probState ? probState->A(0) : 0.0, probState ? probState->A(1) : 0.0);
                 } else {
                     sm.UIserver->sendCmd(std::string("BUSY"));
                     spdlog::warn("S_AX missing axis argument in Standby");
