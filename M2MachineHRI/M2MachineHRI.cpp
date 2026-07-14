@@ -172,11 +172,11 @@ void M2MachineHRI::end() {
 // -----------------------------------------------------------------------------
 // --- M2MachineHRI main update loop ---
 
-// UI connection management and state update loop. Called in main loop at 100Hz, but only sends state to UI at 40Hz to reduce network load.
-// 100Hz: default setting, see: CANOpenRobotController/src/core/application.cpp -> app_programControlLoop()
+// UI connection management and state update loop. Called in main loop at 500Hz, but only sends state to UI at 40Hz to reduce network load.
+// 500Hz: default setting, see: CANOpenRobotController/src/core/application.cpp -> app_programControlLoop()
 static bool connected = false;
 static auto lastCheck = std::chrono::steady_clock::now();
-// This is the main update loop for the state machine, called at 100Hz. It handles UI command draining, phase control, and state-specific logic.
+// This is the main update loop for the state machine, called at 500Hz. It handles UI command draining, phase control, and state-specific logic.
 void M2MachineHRI::hwStateUpdate() {
     auto now = std::chrono::steady_clock::now();
 
@@ -196,7 +196,7 @@ void M2MachineHRI::hwStateUpdate() {
 
     // Send state to UI at 40Hz to reduce network load (but still have smooth updates in Unity)
     static auto lastSend = std::chrono::steady_clock::now();
-    if (connected && std::chrono::duration<double,std::milli>(now - lastSend).count() >= 25.0) { // 25ms = 40Hz
+    if (connected && std::chrono::duration<double,std::milli>(now - lastSend).count() >= 24.0) { // 24ms ~= 41.7Hz
         UIserver->sendState();
         lastSend = now;
     }
