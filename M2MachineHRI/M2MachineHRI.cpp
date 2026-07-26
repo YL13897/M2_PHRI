@@ -44,25 +44,19 @@ static bool toProbOnBtn(StateMachine& SM){
             std::string cu = trim(cmd);
             std::transform(cu.begin(), cu.end(), cu.begin(), [](unsigned char ch){ return std::toupper(ch); });
 
-            if (cu.rfind("S_AX", 0) == 0) {
-                if (!v.empty()) {
-                    int axisMode = v[0] >= 0.5 ? 1 : 0;
+            if (cu == "S_A") {
+                if (v.size() >= 2) {
                     auto probState = sm.state<M2ProbMoveState>("ProbMoveState");
                     auto stbyState = sm.state<M2StandbyState>("StandbyState");
-                    if (probState) {
-                        if (v.size() >= 3) probState->ApplyAxisMode(axisMode, v[2]);
-                        else probState->ApplyAxisMode(axisMode);
-                        if (v.size() >= 2) probState->useAdmittance = v[1] >= 0.5;
-                    }
-                    if (stbyState) {
-                        if (v.size() >= 3) stbyState->ApplyAxisMode(axisMode, v[2]);
-                        else stbyState->ApplyAxisMode(axisMode);
-                    }
+                    if (probState) probState->setA(v[0], v[1]);
+                    if (stbyState) stbyState->setA(v[0], v[1]);
                     sm.UIserver->sendCmd(std::string("OK"));
-                    spdlog::info("Standby axis mode updated to: {}, admittance={}, A=({:.3f}, {:.3f})", axisMode, probState ? probState->useAdmittance : false, probState ? probState->A(0) : 0.0, probState ? probState->A(1) : 0.0);
+                    spdlog::info("Standby A updated to ({:.3f}, {:.3f})",
+                                 probState ? probState->A(0) : 0.0,
+                                 probState ? probState->A(1) : 0.0);
                 } else {
                     sm.UIserver->sendCmd(std::string("BUSY"));
-                    spdlog::warn("S_AX missing axis argument in Standby");
+                    spdlog::warn("S_A missing x or y coordinate in Standby");
                 }
                 sm.UIserver->clearCmd();
                 continue;
@@ -74,23 +68,6 @@ static bool toProbOnBtn(StateMachine& SM){
                 sm.UIserver->sendCmd(std::string("BGOK"));
                 spdlog::info("[TRANS] accepting BGIN -> toProb");
                 return true;
-            }
-
-            // Update Standby K from Unity during Standby
-            if (cu.rfind("STBK", 0) == 0) {
-                if (!v.empty()) {
-                    auto probState = sm.state<M2ProbMoveState>("ProbMoveState");
-                    auto stbyState = sm.state<M2StandbyState>("StandbyState");
-                    if (probState) {
-                        probState->waitLatchK_ = v[0];
-                    }
-                    if (stbyState) {
-                        stbyState->holdK_ = v[0];
-                    }
-                    spdlog::info("Standby K updated to: {}", v[0]);
-                }
-                sm.UIserver->clearCmd();
-                continue;
             }
 
             // Ignore noisy runtime commands in Standby (not part of Standby protocol).

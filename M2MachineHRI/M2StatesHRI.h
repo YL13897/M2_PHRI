@@ -27,11 +27,6 @@ class M2TimedState : public State {
         // Constructor takes robot pointer and optional name
         M2TimedState(RobotM2 *M2, const char *name = NULL): State(name), robot(M2){};
 
-        // Shared robust position lock command
-        VM2 computeHoldForce(const VM2& currentPos, const VM2& currentVel, const VM2& targetPos, double stiffK = 1200.0, double dampD = 40.0) {
-            return stiffK * (targetPos - currentPos) - dampD * currentVel;
-        }
-
     private:
         void entry(void) final {
             std::cout
@@ -79,7 +74,7 @@ class M2CalibState : public M2TimedState {
         bool calibDone=false;
 };
 
-//  M2StandbyState: Transparent idle, then pre-positions to A safely.
+// M2StandbyState: Limp idle, then pre-positions to A safely.
 class M2StandbyState : public M2TimedState {
     public:
         M2StandbyState(RobotM2* M2, M2MachineHRI* mach, const char* name = "M2 Standby")
@@ -88,17 +83,14 @@ class M2StandbyState : public M2TimedState {
         void entryCode() override;
         void duringCode() override;
         void exitCode() override;
-        bool ApplyAxisMode(int axisMode);
-        bool ApplyAxisMode(int axisMode, double lockedA);
-
-        // Added dynamic Standby K control
-        double holdK_ = 1200.0;
+        bool setA(double x, double y);
 
     private:
         M2MachineHRI* machine = nullptr;
-        VM2 A{0.32, 0.20}; // Runtime target A; default X, changed by ApplyAxisMode().
+        VM2 A{0.32, 0.20};
         VM2 Xi;
         bool isMoving = false;
+        bool holdActive = false;
         double tMoveStart = 0.0;
         double T_move = 4.0;
         bool safetyTripped = false;
@@ -106,7 +98,7 @@ class M2StandbyState : public M2TimedState {
 
 
 // Probabilistic move block: TO_A -> WAIT_START -> TRIAL
-// Handles UI commands, scoring, deterministic LEFT/UP schedule, and CSV logs
+// Handles UI commands, X-axis trial control, and CSV logs.
 class M2ProbMoveState : public M2TimedState {
     public:
         M2ProbMoveState(RobotM2* M2, M2MachineHRI* mach, const char* name="M2 Probabilistic Move");
@@ -116,18 +108,14 @@ class M2ProbMoveState : public M2TimedState {
         void exitCode() override;
 
         bool isFinished() const { return finishedFlag; }
-        bool ApplyAxisMode(int axisMode);
-        bool ApplyAxisMode(int axisMode, double lockedA);
+        bool setA(double x, double y);
         
         // --- Experiment config ---
-        VM2 A{0.32, 0.20}; // Target A position (m), selected by axis mode.
-        int activeAxis_ = 0; // 0 = X Axis, 1 = Y Axis.
+        VM2 A{0.32, 0.20};
         bool safetyTripped = false;
         
         // --- Workspace limits and wall config ---
         bool softWallEnabled = false; // only enable walls after reaching A
-        double wallMin_ = 0.20; // Runtime wall min; default X.
-        double wallMax_ = 0.44; // Runtime wall max; default X.
         const double k_wall = 800.0; // wall stiffness N/m
         const double d_wall = 40.0;  // wall damping N·s/m
 
@@ -136,11 +124,7 @@ class M2ProbMoveState : public M2TimedState {
         double forceSaturation   = 80.0;
         bool trialCsvEnabled_ = true;
 
-        // --- Dynamic Standby K controls ---
-        double waitLatchK_ = 1200.0;
-
-        // --- Trial admittance debug mode for current V2_PHRI + V1_POS path ---
-        bool useAdmittance = true; // if true, use admittance control in TRIAL phase; else, transparent mode with only friction compensation.
+        // --- Trial admittance control ---
         double admM = 0.8;
         double admB = 5.0;
         double admVelLimit = 0.4;
@@ -149,8 +133,7 @@ class M2ProbMoveState : public M2TimedState {
 
         // --- ToA related variables ---
         bool atA_hold = false;
-        double holdTimeA  = 0.5; // Shortened from 1.0s to avoid getting stuck if slightly drifting
-        double epsA_hold  = 0.04; // Increased from 0.02m to 0.04m to accommodate steady-state friction error
+        double holdTimeA  = 0.5;
         double inBandSince = 0.0;
         VM2    Xi;
         double T_toA  = 4.0;
@@ -163,7 +146,7 @@ class M2ProbMoveState : public M2TimedState {
         VM2 readUserForce();
         void resetToAPlan(const VM2& Xnow);
         void openCSV();
-        void writeCSV(double tTrial, const VM2& pos, const VM2& vel, const VM2& interactionForce, const VM2& endEffForce, const VM2& fInternal, const VM2& fUser, double effort);
+        void writeCSV(double tTrial, const VM2& pos, const VM2& vel, const VM2& interactionForce, const VM2& endEffForce, const VM2& fInternal, double effort);
         void applyForce(const VM2& F);
 
     private:
@@ -186,6 +169,7 @@ class M2ProbMoveState : public M2TimedState {
         // Flags to simulate entryCode() for each phase
         bool initToA = true;
         bool initTrial = true;
+        bool holdActive_ = false;
         bool admittanceActive_ = false;
         bool pendingStart = false;  // captured TRBG; consumed only in WAIT_START
         bool rwstAckPending_ = false; // defer RWOK until TO_A has reached A and entered WAIT_START
@@ -211,16 +195,6 @@ class M2ProbMoveState : public M2TimedState {
         // Safety fallback: auto-clear disturbance if DSTR=0 is missed.
         double disturbanceAutoOffSec_ = 0.40; // based on Unity setup: T=L_zone/v_forward = 2 x 10 / 50 = 0.4 s
         double disturbanceExpireAt_ = -1.0;
-        // Axis lock setup.
-        bool axisLockEnabled_ = false;
-        double axisLockK_ = 1500.0;
-        double axisLockD_ = 60.0;
-
-        // WAIT_START latch: after AT_A is achieved, hold around A with a virtual spring-damper.
-        // Released when transitioning into TRIAL.
-        bool waitLatchEnabled_ = false;
-        double waitLatchD_ = 40.0;
-
         // TRIAL part: scoring and trial end detection
         double trialStartTime = 0.0;
         // double effortIntegral = 0.0;

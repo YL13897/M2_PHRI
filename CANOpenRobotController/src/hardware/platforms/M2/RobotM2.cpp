@@ -163,15 +163,23 @@ void RobotM2::printJointStatus() {
 bool RobotM2::initPositionControl() {
     spdlog::debug("Initialising Position Control on all joints ");
     bool returnValue = true;
+    const VM2 holdPosition = getPosition();
+    int jointIndex = 0;
     for (auto p : joints) {
-        if (((JointM2 *)p)->setMode(CM_POSITION_CONTROL) != CM_POSITION_CONTROL) {
-            // Something bad happened if were are here
-            spdlog::error("Something bad happened");
+        auto joint = static_cast<JointM2 *>(p);
+        if (joint->setMode(CM_POSITION_CONTROL) != CM_POSITION_CONTROL) {
+            spdlog::error("Could not set position control for joint {}", p->getId());
             returnValue = false;
+        } else if (joint->setPosition(holdPosition(jointIndex)) != SUCCESS) {
+            spdlog::error("Could not preload position target for joint {}", p->getId());
+            returnValue = false;
+        } else {
+            joint->readyToSwitchOn();
         }
-        // Put into ReadyToSwitchOn()
-        ((JointM2 *)p)->readyToSwitchOn();
+        ++jointIndex;
     }
+    if (!returnValue)
+        return false;
 
     // Pause for a bit to let commands go
     usleep(2000);
