@@ -119,8 +119,7 @@ class M2ProbMoveState : public M2TimedState {
         const double k_wall = 800.0; // wall stiffness N/m
         const double d_wall = 40.0;  // wall damping N·s/m
 
-        // --- User force config ---
-        double userForceScale   = 1.0;  // scale factor for user force
+        // --- Force config ---
         double forceSaturation   = 80.0;
         bool trialCsvEnabled_ = true;
 
@@ -143,7 +142,6 @@ class M2ProbMoveState : public M2TimedState {
 
         // --- Helper methods ---
         VM2 impedance(const VM2& X0, const VM2& X, const VM2& dX, const VM2& dXd = VM2::Zero());
-        VM2 readUserForce();
         void resetToAPlan(const VM2& Xnow);
         void openCSV();
         void writeCSV(double tTrial, const VM2& pos, const VM2& vel, const VM2& interactionForce, const VM2& endEffForce, const VM2& fInternal, double effort);

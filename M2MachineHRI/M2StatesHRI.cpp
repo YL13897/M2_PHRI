@@ -92,8 +92,8 @@ static constexpr double X_MIN = 0.20;
 static constexpr double X_MAX = 0.44;
 static constexpr double Y_MIN = 0.12;
 static constexpr double Y_MAX = 0.38;
-static constexpr double HOLD_POS_EPS = 0.01;
-static constexpr double HOLD_VEL_EPS = 0.02;
+static constexpr double HOLD_POS_EPS = 0.04;
+static constexpr double HOLD_VEL_EPS = 0.05;
 
 static inline VM2 clampA(double x, double y) {
     if (!std::isfinite(x)) x = 0.32;
@@ -260,8 +260,8 @@ void M2StandbyState::duringCode() {
 
         VM2 Xd, dXd;
         MinJerk(Xi, A, T_move, std::min(t_moved, T_move), Xd, dXd);
-        Eigen::Matrix2d K = Eigen::Matrix2d::Identity() * 300.0;
-        Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * 15.0;
+        Eigen::Matrix2d K = Eigen::Matrix2d::Identity() * 600.0;
+        Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * 25.0;
         VM2 F_cmd = K * (Xd - X) + D * (dXd - dX);
         if (t_moved < 0.5) F_cmd *= (t_moved / 0.5);
         for (int i = 0; i < 2; ++i) F_cmd(i) = clamp_compat(F_cmd(i), -60.0, 60.0);
@@ -779,22 +779,6 @@ VM2 M2ProbMoveState::impedance(const VM2& X0, const VM2& X, const VM2& dX, const
     Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * d;
     // return K * (X0 - X) + D * (dXd - dX);
     return K * (X0 - X) - D * dX;
-}
-
-// Read user force from joystick axes, scaled by userForceScale
-VM2 M2ProbMoveState::readUserForce() {
-    VM2 f = VM2::Zero();
-    if (robot->joystick) {
-        const double ax0 = robot->joystick->getAxis(0);
-        const double ax1 = robot->joystick->getAxis(1);
-        f(0) = userForceScale * ax0;
-        f(1) = userForceScale * ax1;
-        spdlog::debug("[EFFORT] readUserForce axes=({:.3f},{:.3f}) scale={} -> F_user=({:.3f},{:.3f})",
-                      ax0, ax1, userForceScale, f(0), f(1));
-    } else {
-        spdlog::warn("[EFFORT] readUserForce: joystick is null; returning (0,0)");
-    }
-    return f;
 }
 
 // Reset TO_A trajectory plan with current position as new start, used when entering TO_A
