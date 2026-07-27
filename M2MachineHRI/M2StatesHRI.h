@@ -1,5 +1,5 @@
 /* 
-    M2StatesHRI.h and M2MachineHRI.cpp:
+    M2StatesHRI.h:
         Core state implementations for M2 machine
         - Calibration, Standby, Probabilistic Move (TO_A / WAIT_START / TRIAL)
         - UI command handling and CSV logging
@@ -11,11 +11,7 @@
 #include "RobotM2.h"
 #include "State.h"
 #include "StateMachine.h"
-#include <random>
 #include <fstream>
-#include <sstream>
-#include <iomanip>
-#include <deque>
 using namespace std;
 
 class M2MachineHRI;
@@ -176,10 +172,6 @@ class M2ProbMoveState : public M2TimedState {
         // Commands part: Mode setting
         enum HRIMode { V1_HRI, V2_PHRI };
         HRIMode HRIMode_ = V2_PHRI;
-        int HRI_Mode = 2;
-
-        // Unity feedback force command (updated by FRC2, applied in TRIAL)
-        // VM2 unityForceCmd_ = VM2::Zero();
 
         // Disturbance state from Unity (DSTR -1/0/+1). In pHRI we use native M2 disturbance force.
         bool disturbanceActive_ = false;
@@ -190,8 +182,6 @@ class M2ProbMoveState : public M2TimedState {
         double disturbanceExpireAt_ = -1.0;
         // TRIAL part: scoring and trial end detection
         double trialStartTime = 0.0;
-        // double effortIntegral = 0.0;
-        // double rawEffortIntegral = 0.0;
         double trialDurationSec = 3600.0;
         int trialIndex_ = 0;
 
@@ -201,47 +191,6 @@ class M2ProbMoveState : public M2TimedState {
         double startMinInterval = 0.5; // minimum interval between accepted TRBG commands
         
         std::ofstream csv; // CSV file stream for logging
-
-        // --- Preload detection (WAIT_START) ---
-        struct WaitSample {
-            double t;      // state running() time
-            VM2    pos;    // end-eff position
-            VM2    vel;    // end-eff velocity
-            VM2    force;  // sensed end-eff force
-        };
-
-
-        // -------------------------------------------------------------
-        // ------------------------ Optional ---------------------------
-
-        std::mt19937 rng; // Random number generator for deterministic perturbation scheduling
-        
-        // --- Debugging helpers for UI command processing ---
-
-        // Check if a string is printable ASCII (for logging/debugging)
-        static bool isPrintableAscii(const std::string& s) {
-            for (unsigned char ch : s) {
-                if (ch < 0x20 || ch > 0x7E) { 
-                    if (ch!='\n' && ch!='\r' && ch!='\t') return false;
-                }
-            }
-            return true;
-        }
-
-        /* 
-        The hexDump function converts each byte in a string to a two-digit uppercase hexadecimal string, useful for debugging binary communication data.
-        For example, the string "Hi\n" contains 'H' (0x48), 'i' (0x69), and newline '\n' (0x0A), and its hexadecimal representation is "48 69 0A".
-        This is especially useful for debugging communication protocols where non-printable characters may be present.
-        */
-        static std::string hexDump(const std::string& s) {
-            std::ostringstream h;
-            h.setf(std::ios::hex, std::ios::basefield);
-            h.setf(std::ios::uppercase);
-            for (unsigned char ch : s) {
-                h << std::setw(2) << std::setfill('0') << (int)ch << ' ';
-            }
-            return h.str();
-        }
 };
 
 #endif

@@ -1,7 +1,6 @@
 /*
     M2MachineHRI.cpp: 
-    Top-level state machine implementation for M2 robot control, trial logic, 
-    effort computation, deterministic perturbation scheduling, 
+    Top-level state machine implementation for M2 robot control, trial logic,
     and Unity interface synchronization.
 */
 
@@ -9,16 +8,11 @@
 #include "M2MachineHRI.h"
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 
 
 // ----------------------------------------------------------------------------
 // --- Transition guards implementations ---
-
-// Wall-clock time helper (seconds since epoch) for logs
-static inline double system_time_sec() {
-    using namespace std::chrono;
-    return duration_cast<duration<double>>(system_clock::now().time_since_epoch()).count();
-}
 
 // Transition guard: calibration finished -> leave CalibState
 static bool endCalib(StateMachine& sm) {
@@ -113,7 +107,6 @@ M2MachineHRI::M2MachineHRI() {
     setInitState("CalibState"); 
 }
 
-// Destructor
 M2MachineHRI::~M2MachineHRI() {
 }
 
@@ -121,13 +114,6 @@ M2MachineHRI::~M2MachineHRI() {
 void M2MachineHRI::init() {
     spdlog::debug("M2Machine::init()");
     if (robot()->initialise()) {
-        // Basic machine-wide CSV logger (position/velocity/force)
-        // logHelper.initLogger("M2MachineLog", "logs/M2Machine.csv", LogFormat::CSV, true);
-        // logHelper.add(runningTime(),                 "Time (s)");
-        // logHelper.add(robot()->getEndEffPosition(),  "Position");
-        // logHelper.add(robot()->getEndEffVelocity(),  "Velocity");
-        // logHelper.add(robot()->getEndEffForce(),     "Force");
-        // logHelper.startLogger();
         // Initialise a default session id with epoch seconds if Unity hasn't set one yet
         if (sessionId == "UNSET") {
             auto now = std::chrono::system_clock::now();

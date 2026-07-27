@@ -4,8 +4,7 @@
  *      Project:   M2 Human–Robot Interaction Experiment Framework
  *      Module:    M2MachineHRI / M2StatesHRI
  *      Purpose:   State machine implementation for M2 robot control, trial logic,
- *                 effort computation, deterministic perturbation scheduling, and
- *                 Unity interface synchronization.
+ *                 disturbance control, logging, and Unity synchronization.
  *
  * =====================================================================================
  */

@@ -1,29 +1,21 @@
 /* 
-    M2StatesHRI.h and M2MachineHRI.cpp:
+    M2StatesHRI.cpp:
         Core state implementations for M2 machine
         - Calibration, Standby, Probabilistic Move (TO_A / WAIT_START / TRIAL)
         - UI command handling and CSV logging
 */
 
-#include <chrono>
 #include <spdlog/spdlog.h>
 #include "M2StatesHRI.h"
 #include "M2MachineHRI.h"
 #include <cmath>
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
 #include <limits>
-#include <sstream>
-#include <random>
 
 
 // ----------------------------------------------------------------------------
-// Local wall-clock helper for CSV timestamps
-static inline double system_time_sec() {
-    using namespace std::chrono;
-    return duration_cast<duration<double>>(system_clock::now().time_since_epoch()).count();
-}
-
 // Minimum-jerk trajectory helper (position/velocity/optional acceleration)
 static inline double MinJerk(const VM2& X0, const VM2& Xf, double T, double t,
                              VM2& Xd, VM2& dXd, VM2* ddXd=nullptr){
@@ -329,7 +321,6 @@ void M2ProbMoveState::entryCode() {
     lastStartTime = -1.0;
     rwstAckPending_ = false;
     workspaceGuardEnabled = false;
-    // unityForceCmd_ = VM2::Zero();
     disturbanceActive_ = false;
     disturbanceExpireAt_ = -1.0;
     holdActive_ = false;
@@ -339,10 +330,9 @@ void M2ProbMoveState::entryCode() {
 
 }
 
-// Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL), 
-    // feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
+// Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL).
 void M2ProbMoveState::duringCode() {
-    // === GLOBAL COMMAND DRAIN === (TRBG/RWST/FRC2/DSTR/S_A/S_MD)
+    // === GLOBAL COMMAND DRAIN === (TRBG/RWST/DSTR/S_A/S_MD)
     {
         int guard = 1024; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 1024 commands.
         while (guard-- > 0 && machine && machine->UIserver && machine->UIserver->isCmd()) {
@@ -398,7 +388,6 @@ void M2ProbMoveState::duringCode() {
             if (cu.rfind("RWST", 0) == 0) {
                 if (currentPhase == TRIAL) {
                     stopAdmittance();
-                    // unityForceCmd_.setZero();
                     if (machine && machine->UIserver) {
                         machine->UIserver->sendCmd("TRND");
                         spdlog::info("TRIAL: RWST accepted -> TRND");
@@ -442,19 +431,6 @@ void M2ProbMoveState::duringCode() {
                 machine->UIserver->clearCmd();
                 continue;
             }
-
-
-        // ------------------------- For testing ----------------------------------------
-        // Continuous Unity->M2 feedback force update (used during TRIAL)
-            // if (cu.rfind("FRC2", 0) == 0) {
-            //     if (a.size() >= 2) {
-            //         unityForceCmd_(0) = a[0];
-            //         unityForceCmd_(1) = a[1];
-            //     }
-            //     machine->UIserver->clearCmd();
-            //     continue;
-            // }
-        // ------------------------------------------------------------------------------
 
             // Disturbance active flag and magnitude from Unity: DSTR [val]
             if (cu.rfind("DSTR", 0) == 0) {
@@ -502,9 +478,9 @@ void M2ProbMoveState::duringCode() {
             if (cu.rfind("S_MD",0)==0) {
                 if (currentPhase != TRIAL) {
                     if (!a.empty()) {
-                        HRI_Mode = (int)std::round(a[0]);
-                        HRIMode_ = (HRI_Mode == 2) ? V2_PHRI : V1_HRI;
-                        spdlog::info("PHASE {}: S_MD -> mode={}", (int)currentPhase, HRI_Mode);
+                        int hriMode = (int)std::round(a[0]);
+                        HRIMode_ = (hriMode == 2) ? V2_PHRI : V1_HRI;
+                        spdlog::info("PHASE {}: S_MD -> mode={}", (int)currentPhase, hriMode);
                         if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
                     } else {
                         spdlog::warn("WAIT_START: S_MD missing args");
@@ -519,7 +495,6 @@ void M2ProbMoveState::duringCode() {
 
             // Emergency stop: finish ProbMove and return Standby via top-level transition
             if (cu.rfind("SESS",0)==0) {
-                // unityForceCmd_.setZero();
                 stopAdmittance();
                 stopHold(robot, holdActive_);
                 finishedFlag = true;
@@ -608,15 +583,6 @@ void M2ProbMoveState::duringCode() {
 
         // --- WAIT_START: transition to TRIAL ---
         case WAIT_START: {
-            // This block simulates WAIT_START: 
-            // {
-            //     WaitSample s;
-            //     s.t     = running();
-            //     s.pos   = robot->getEndEffPosition();
-            //     s.vel   = robot->getEndEffVelocity();
-            //     s.force = robot->getEndEffForce();
-            // }
-
             if (!startHold(robot, A, holdActive_)) {
                 initToA = true;
                 inBandSince = 0.0;
@@ -646,8 +612,6 @@ void M2ProbMoveState::duringCode() {
                 // Simulate entryCode() for TRIAL
                 trialStartTime = running();
                 safetyTripped = false;
-                // effortIntegral = 0.0;
-                // rawEffortIntegral = 0.0;
                 ++trialIndex_;
 
                 if (machine && machine->UIserver) {
@@ -724,7 +688,6 @@ void M2ProbMoveState::duringCode() {
                     machine->UIserver->sendCmd("TRND");
                     spdlog::info("Log: TRND (tTrial={:.3f}s)", tTrial);
                 }
-                // unityForceCmd_.setZero();
                 stopAdmittance();
                 pendingStart = false;
                 initTrial = true;
@@ -746,7 +709,6 @@ void M2ProbMoveState::duringCode() {
 
 // Cleanup on ProbMove exit: zero forces, close CSVs, send session summary
 void M2ProbMoveState::exitCode() {
-    // unityForceCmd_ = VM2::Zero();
     stopAdmittance();
     stopHold(robot, holdActive_);
     robot->setEndEffForceWithCompensation(VM2::Zero());
@@ -769,7 +731,6 @@ void M2ProbMoveState::exitCode() {
 VM2 M2ProbMoveState::impedance(const VM2& X0, const VM2& X, const VM2& dX, const VM2& dXd) {
     Eigen::Matrix2d K = Eigen::Matrix2d::Identity() * k;
     Eigen::Matrix2d D = Eigen::Matrix2d::Identity() * d;
-    // return K * (X0 - X) + D * (dXd - dX);
     return K * (X0 - X) - D * dX;
 }
 
@@ -853,7 +814,6 @@ void M2ProbMoveState::openCSV() {
         return;
     }
     if (csv.tellp() == 0) {
-        // csv << "trial_index,time_trial,sys_time,pos_x,pos_y,vel_x,vel_y,handle_fx,handle_fy,internal_fx,internal_fy,user_fx,user_fy,effort,disturbance_active,disturbance_direction\n";
         csv << "trial_index,time_trial,pos_x,pos_y,vel_x,vel_y,interaction_fx,interaction_fy,endeffect_fx,endeffect_fy,internal_fx,internal_fy,effort,disturbance_active,disturbance_direction\n";
     }
 }
