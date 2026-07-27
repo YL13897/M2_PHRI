@@ -90,14 +90,14 @@ static constexpr int X_AXIS = 0;
 static constexpr int Y_AXIS = 1;
 static constexpr double X_MIN = 0.20;
 static constexpr double X_MAX = 0.44;
-static constexpr double Y_MIN = 0.12;
+static constexpr double Y_MIN = 0.10;
 static constexpr double Y_MAX = 0.38;
-static constexpr double HOLD_POS_EPS = 0.04;
+static constexpr double HOLD_POS_EPS = 0.02;
 static constexpr double HOLD_VEL_EPS = 0.05;
 
 static inline VM2 clampA(double x, double y) {
     if (!std::isfinite(x)) x = 0.32;
-    if (!std::isfinite(y)) y = 0.20;
+    if (!std::isfinite(y)) y = 0.12;
     return VM2(clamp_compat(x, X_MIN, X_MAX), clamp_compat(y, Y_MIN, Y_MAX));
 }
 
@@ -328,7 +328,7 @@ void M2ProbMoveState::entryCode() {
     // Reset debounce clock on state entry so running()-based delta stays valid.
     lastStartTime = -1.0;
     rwstAckPending_ = false;
-    softWallEnabled = false;
+    workspaceGuardEnabled = false;
     // unityForceCmd_ = VM2::Zero();
     disturbanceActive_ = false;
     disturbanceExpireAt_ = -1.0;
@@ -342,7 +342,7 @@ void M2ProbMoveState::entryCode() {
 // Main loop: drain UI, then run phase switch (TO_A / WAIT_START / TRIAL), 
     // feedback signal cmds (BUSY/OK), and feedback force cmd (FRC2) handling   
 void M2ProbMoveState::duringCode() {
-    // === GLOBAL COMMAND DRAIN === (TRBG/RWST/FRC2/DSTR/S_A/S_MD/S_CT)
+    // === GLOBAL COMMAND DRAIN === (TRBG/RWST/FRC2/DSTR/S_A/S_MD)
     {
         int guard = 1024; // prevent infinite loop, a single `duringCode()` loop can read a maximum of 1024 commands.
         while (guard-- > 0 && machine && machine->UIserver && machine->UIserver->isCmd()) {
@@ -406,7 +406,7 @@ void M2ProbMoveState::duringCode() {
                     pendingStart = false;
                     initToA = true;
                     inBandSince = 0.0;
-                    softWallEnabled = false;
+                    workspaceGuardEnabled = false;
                     rwstAckPending_ = true;
                     safetyTripped = false;
                     currentPhase = TO_A;
@@ -430,7 +430,7 @@ void M2ProbMoveState::duringCode() {
                     pendingStart = false;
                     initToA = true;
                     inBandSince = 0.0;
-                    softWallEnabled = false;
+                    workspaceGuardEnabled = false;
                     safetyTripped = false;
                     currentPhase = TO_A;
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
@@ -484,7 +484,7 @@ void M2ProbMoveState::duringCode() {
                         pendingStart = false;
                         initToA = true;
                         inBandSince = 0.0;
-                        softWallEnabled = false;
+                        workspaceGuardEnabled = false;
                         safetyTripped = false;
                         currentPhase = TO_A;
                     }
@@ -498,23 +498,16 @@ void M2ProbMoveState::duringCode() {
                 continue;
             }
 
-            // Handle mode setting commands (S_MD, S_CT) in WAIT_START/TO_A
-            if (cu.rfind("S_MD",0)==0 || cu.rfind("S_CT",0)==0) {
+            // Handle HRI mode setting in WAIT_START/TO_A.
+            if (cu.rfind("S_MD",0)==0) {
                 if (currentPhase != TRIAL) {
-                    if (cu.rfind("S_MD",0)==0 && !a.empty()) {
+                    if (!a.empty()) {
                         HRI_Mode = (int)std::round(a[0]);
                         HRIMode_ = (HRI_Mode == 2) ? V2_PHRI : V1_HRI;
                         spdlog::info("PHASE {}: S_MD -> mode={}", (int)currentPhase, HRI_Mode);
                         if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-
-                    } else if (cu.rfind("S_CT",0)==0 && !a.empty()) {
-                        Ctrl_Mode = (int)std::round(a[0]);
-                        CtrlMode_ = (Ctrl_Mode == 1) ? V1_POS : V2_VEL;
-                        spdlog::info("PHASE {}: S_CT -> mode={}", (int)currentPhase, Ctrl_Mode);
-                        if (machine && machine->UIserver) machine->UIserver->sendCmd("OK");
-
                     } else {
-                        spdlog::warn("WAIT_START: mode cmd '{}' missing args", cu);
+                        spdlog::warn("WAIT_START: S_MD missing args");
                     }
                 } else {
                     if (machine && machine->UIserver) machine->UIserver->sendCmd("BUSY");
@@ -592,7 +585,7 @@ void M2ProbMoveState::duringCode() {
             }
 
             if (atA_hold && startHold(robot, A, holdActive_)) {
-                softWallEnabled = true;
+                workspaceGuardEnabled = true;
                 currentPhase = WAIT_START;
                 if (machine && machine->UIserver) {
                     machine->UIserver->sendCmd("AT_A");
@@ -662,7 +655,6 @@ void M2ProbMoveState::duringCode() {
                         std::vector<double> p; 
                         p.push_back(trialStartTime);                      // t
                         p.push_back((HRIMode_ == V2_PHRI) ? 2 : 1);       // HRI_Mode
-                        p.push_back((CtrlMode_ == V2_VEL) ? 2 : 1);       // Ctrl_Mode
                         machine->UIserver->sendCmd("TRBG", p);  // TRial BeGin with params
                         spdlog::info("Log: TRBG");
                     }
@@ -711,7 +703,7 @@ void M2ProbMoveState::duringCode() {
                     for (int i = 0; i < 2; ++i)
                         Vd(i) = clamp_compat(Vd(i), -velLimit, velLimit);
                 }
-                if (softWallEnabled) {
+                if (workspaceGuardEnabled) {
                     if (X(X_AXIS) < X_MIN && Vd(X_AXIS) < 0.0) Vd(X_AXIS) = 0.0;
                     if (X(X_AXIS) > X_MAX && Vd(X_AXIS) > 0.0) Vd(X_AXIS) = 0.0;
                 }
@@ -788,7 +780,7 @@ void M2ProbMoveState::resetToAPlan(const VM2& Xnow) {
     inBandSince = 0.0;
 }
 
-// Apply force command with optional soft wall constraints
+// Apply force command with safety checks and saturation
 void M2ProbMoveState::applyForce(const VM2& F) {
 
     VM2 X_chk  = robot->getEndEffPosition();
@@ -822,29 +814,6 @@ void M2ProbMoveState::applyForce(const VM2& F) {
         return;
     }
     VM2 F_cmd = F;
-
-    if (softWallEnabled) {
-        VM2 X  = robot->getEndEffPosition();
-        VM2 dX = robot->getEndEffVelocity();
-
-        if (X(X_AXIS) < X_MIN) {
-            double pen = X_MIN - X(X_AXIS);
-            double F_wall = k_wall * pen - d_wall * dX(X_AXIS);
-            if (F_wall > 0.0) F_cmd(X_AXIS) += F_wall;
-        }
-
-        if (X(X_AXIS) > X_MAX) {
-            double pen = X(X_AXIS) - X_MAX;
-            double F_wall = k_wall * pen + d_wall * dX(X_AXIS);
-            if (F_wall > 0.0) F_cmd(X_AXIS) -= F_wall;
-        }
-
-        if (X(Y_AXIS) > Y_MAX) {
-            double penY = X(Y_AXIS) - Y_MAX;
-            double F_wallY = k_wall * penY + d_wall * dX(Y_AXIS);
-            if (F_wallY > 0.0) F_cmd(Y_AXIS) -= F_wallY;
-        }
-    }
 
     // Clamp forces
     for (int i=0; i<2; ++i)

@@ -87,7 +87,7 @@ class M2StandbyState : public M2TimedState {
 
     private:
         M2MachineHRI* machine = nullptr;
-        VM2 A{0.32, 0.20};
+        VM2 A{0.32, 0.12};
         VM2 Xi;
         bool isMoving = false;
         bool holdActive = false;
@@ -111,13 +111,11 @@ class M2ProbMoveState : public M2TimedState {
         bool setA(double x, double y);
         
         // --- Experiment config ---
-        VM2 A{0.32, 0.20};
+        VM2 A{0.32, 0.12};
         bool safetyTripped = false;
         
-        // --- Workspace limits and wall config ---
-        bool softWallEnabled = false; // only enable walls after reaching A
-        const double k_wall = 800.0; // wall stiffness N/m
-        const double d_wall = 40.0;  // wall damping N·s/m
+        // --- Workspace guard ---
+        bool workspaceGuardEnabled = false;
 
         // --- Force config ---
         double forceSaturation   = 80.0;
@@ -179,9 +177,6 @@ class M2ProbMoveState : public M2TimedState {
         enum HRIMode { V1_HRI, V2_PHRI };
         HRIMode HRIMode_ = V2_PHRI;
         int HRI_Mode = 2;
-        enum CtrlMode { V1_POS, V2_VEL };
-        CtrlMode CtrlMode_ = V1_POS;
-        int Ctrl_Mode = 1;
 
         // Unity feedback force command (updated by FRC2, applied in TRIAL)
         // VM2 unityForceCmd_ = VM2::Zero();

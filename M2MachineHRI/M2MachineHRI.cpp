@@ -74,7 +74,7 @@ static bool toProbOnBtn(StateMachine& SM){
             if (cu.rfind("FRC2", 0) == 0 || cu.rfind("DSTR", 0) == 0 ||
                 cu.rfind("TRBG", 0) == 0 || cu.rfind("RWST", 0) == 0 ||
                 cu.rfind("TO_A", 0) == 0 || cu.rfind("S_MD", 0) == 0 ||
-                cu.rfind("S_CT", 0) == 0 || cu.rfind("SESS", 0) == 0) {
+                cu.rfind("SESS", 0) == 0) {
                 sm.UIserver->clearCmd();
                 continue;
             }
