@@ -120,7 +120,7 @@ class M2ProbMoveState : public M2TimedState {
         // --- Trial admittance control ---
         double admM = 0.8;
         double admB = 5.0;
-        double admVelLimit = 0.4;
+        double admVelLimit = 0.6;
         double admLockK = 2.0;
         double admLockD = 0.2;
 
