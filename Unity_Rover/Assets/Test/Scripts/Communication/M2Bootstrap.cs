@@ -17,17 +17,10 @@ namespace CORC.Demo
         public bool autoReconnect = true; // automatically try to reconnect if connection is lost
         public float reconnectInterval = 2f; // seconds between reconnect attempts
 
-        [Header("Logging (optional)")]
-        public bool enableCsvLogging = false;
-
-        [Tooltip("Default: persistentDataPath/m2_log.csv")]
-        public string csvPathOverride = ""; // Optional override for log file path
-
         [Header("Refs")]
         public CORC.CORCM2 m2;  
         public M2RoverBridge bridge;
 
-        private string csvPath;
         private Coroutine reconnectCo;
 
         bool ShouldEnableCommunication()
@@ -75,17 +68,6 @@ namespace CORC.Demo
         void TryConnectOnce()
         {
             m2.Init(serverIp, serverPort);
-
-            if (enableCsvLogging)
-            {
-                csvPath = string.IsNullOrEmpty(csvPathOverride)
-                    ? System.IO.Path.Combine(Application.persistentDataPath, "m2_log.csv")
-                    : csvPathOverride;
-
-                m2.SetLoggingFile(csvPath);
-                m2.SetLogging(true);
-                Debug.Log($"[M2Bootstrap] Logging to: {csvPath}");
-            }
         }
 
 
@@ -122,7 +104,6 @@ namespace CORC.Demo
 
             if (m2 != null)
             {
-                if (enableCsvLogging) m2.SetLogging(false);
                 m2.Disconnect();
             }
         }
@@ -132,7 +113,6 @@ namespace CORC.Demo
             if (reconnectCo != null) StopCoroutine(reconnectCo);
             if (m2 != null)
             {
-                if (enableCsvLogging) m2.SetLogging(false);
                 Debug.Log("[M2Bootstrap] OnDisable - disconnecting M2.");
                 m2.Disconnect();
             }

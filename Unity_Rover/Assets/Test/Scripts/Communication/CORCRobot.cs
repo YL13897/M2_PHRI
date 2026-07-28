@@ -108,14 +108,26 @@ namespace CORC
         public bool SetLoggingFile(string filename)
         {
             LoggingFilename = filename;
-            //Create file and write header (and keep it open)
-            Client.LogFileStream = new StreamWriter(LoggingFilename);
-            foreach (string key in State.ItemsOrder)
-            {
-                Client.LogFileStream.Write(key + ",");
-            }
-            Client.LogFileStream.Write("\n");
+            string dir = Path.GetDirectoryName(LoggingFilename);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
+            bool append = File.Exists(LoggingFilename) && new FileInfo(LoggingFilename).Length > 0;
+            Client.LogFileStream?.Dispose();
+            Client.LogFileStream = new StreamWriter(LoggingFilename, append);
+            if (!append)
+                Client.LogFileStream.WriteLine(BuildLoggingHeader());
             return true;
+        }
+
+        public void SetCsvLogContext(int blockIndex, int sectionIndex)
+        {
+            Client?.SetCsvLogContext(blockIndex, sectionIndex);
+        }
+
+        protected virtual string BuildLoggingHeader()
+        {
+            return string.Join(",", State.ItemsOrder);
         }
 
         /// <summary>

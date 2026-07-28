@@ -1,6 +1,5 @@
 using System;
 using UnityEngine;
-// using System;
 
 public class ForceField : MonoBehaviour
 {
@@ -11,23 +10,22 @@ public class ForceField : MonoBehaviour
     public static float DisturbanceDurationSec { get; private set; } = 0.4f;
     public static event Action OnFirstPlayerEnteredAnyField;
 
-    [SerializeField] ForceFieldPreview forceFieldPreview; 
-    
-    [SerializeField]
-    Rigidbody targetRb;
-    [SerializeField]
-    CORC.Demo.M2RoverBridge bridge;
-
-    public float forceMagnitude = 2e3f;
-    // public float forceMagnitude = 1f;
-    public Vector3 fixedDirection = Vector3.left; // direction of the force field effect
+    [SerializeField] ForceFieldPreview forceFieldPreview;
 
     // IsActiveThisRun: Indicates whether this force field instance is active for the current player traversal, determined by sampling the trigger probability on entry.
     // get; -> Anyone can read the value
     // private set; Only this class can change the value
-    public bool IsActiveThisRun { get; private set; }  
+    public bool IsActiveThisRun { get; private set; }
+    private CORC.Demo.M2RoverBridge bridge;
     private bool playerInsideThisActiveField = false;
     private float disturbanceElapsedSec = 0f;
+
+    void Awake()
+    {
+        if (forceFieldPreview == null)
+            forceFieldPreview = GetComponent<ForceFieldPreview>();
+        bridge = FindFirstObjectByType<CORC.Demo.M2RoverBridge>();
+    }
 
     // ResetFirstEntryFlag(): Resets the static flags related to player entry and disturbance.
     public static void ResetFirstEntryFlag()
@@ -40,11 +38,8 @@ public class ForceField : MonoBehaviour
     void OnEnable()
     {
         IsActiveThisRun = false;
-        targetRb = null;
         playerInsideThisActiveField = false;
         disturbanceElapsedSec = 0f;
-        if (bridge == null)
-            bridge = FindFirstObjectByType<CORC.Demo.M2RoverBridge>();
     }
 
     // OnDisable(): Robustness protection - In case the field gets disabled while the player is still inside, we should reset the state to avoid "stuck in disturbance" issues.
@@ -61,12 +56,12 @@ public class ForceField : MonoBehaviour
 
 
     // ------------------------------------------- Core Logic -----------------------------------
-    /* 
+    /*
     OnTriggerEnter() ensures that when player enters an active disturbance field, Unity disturbance source u(t) is enabled,
     and when the player exits, u(t) is disabled.
     */
 
-    // OnTriggerEnter(): Detects when the player enters the force field trigger, samples the disturbance state based on the defined probability, 
+    // OnTriggerEnter(): Detects when the player enters the force field trigger, samples the disturbance state based on the defined probability,
     // and updates the disturbance source u(t) accordingly.
     void OnTriggerEnter(Collider other)
     {
@@ -78,31 +73,37 @@ public class ForceField : MonoBehaviour
         if (!HasPlayerEnteredAnyField)
         {
             HasPlayerEnteredAnyField = true;
-            OnFirstPlayerEnteredAnyField?.Invoke(); // Notify ScoreSystem to enable boundary clamp on first entry
+            OnFirstPlayerEnteredAnyField?.Invoke();
         }
 
         // Read the trigger probability for this force field from the ForceFieldPreview component.
-        float Probability = forceFieldPreview.triggerProbability; 
+        float Probability = forceFieldPreview.triggerProbability;
 
         // sample ONCE per section reuse
-        IsActiveThisRun = UnityEngine.Random.value < Probability;
+        IsActiveThisRun = ExperimentBlockControl.Instance != null
+            ? ExperimentBlockControl.Instance.TriggerDisturbance(Probability)
+            : UnityEngine.Random.value < Probability;
 
+        if (bridge == null)
+            bridge = FindFirstObjectByType<CORC.Demo.M2RoverBridge>();
 
+        if (bridge != null)
+        {
+            var control = ExperimentBlockControl.Instance;
+            int block = control != null ? control.CurrentBlockNumber : 0;
+            int section = control != null ? control.CurrentSectionNumber : 0;
+            int direction = control != null ? control.CurrentDirection : forceFieldPreview.CurrentDirection;
+            bridge.LogDisturbanceDecision(block, section, Probability, direction, IsActiveThisRun);
+        }
 
+        // ----------------------- For testing: keep the field always active -----------------------
 
+        // IsActiveThisRun = true;
 
-
-        IsActiveThisRun = true; // For testing to keep the field always active
-
-
-
-
-
-
+        // -----------------------------------------------------------------------------------------
 
 
         if (!IsActiveThisRun) return;
-        targetRb = other.attachedRigidbody; // Cache the player's Rigidbody for applying forces in FixedUpdate.
 
         if (!playerInsideThisActiveField)
         {
@@ -116,7 +117,6 @@ public class ForceField : MonoBehaviour
     void OnTriggerExit(Collider other)
     {
         if (!other.CompareTag("Player")) return;
-        targetRb = null;
         if (playerInsideThisActiveField)
         {
             playerInsideThisActiveField = false;
@@ -127,15 +127,7 @@ public class ForceField : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (playerInsideThisActiveField && targetRb == null)
-        {
-            playerInsideThisActiveField = false;
-            DisturbanceU = 0f;
-            disturbanceElapsedSec = 0f;
-        }
-
         if (!IsActiveThisRun) return;
-        if (targetRb == null) return;
         if (DisturbanceU <= 0f) return;
 
         // Safe guard: If disturbance duration is exceeded, automatically turn off the disturbance.
@@ -146,15 +138,7 @@ public class ForceField : MonoBehaviour
             return;
         }
 
-        // In M2 pHRI mode, disturbance force is generated on M2 side; skip Unity force to avoid double disturbance.
-        if (bridge != null
-            && bridge.unityMode == CORC.Demo.M2RoverBridge.UnityDriveMode.Mode2_M2
-            && bridge.hriModeCode == 2) return;
-
-        Vector3 dir = fixedDirection.normalized;
-        
-        targetRb.AddForce(dir * (forceMagnitude * DisturbanceU), ForceMode.Force);
-        // targetRb.MovePosition(targetRb.position + dir * speed * Time.fixedDeltaTime);
+        // ForceField only defines the disturbance timing. The active mode decides how to apply it.
     }
 
 }

@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Text;
 
 // This file defines the FLNLClient class, a low-level communication library for CORC allowing to exchange double values and commands (4 characters) with double values parameters.
 namespace CORC
@@ -26,7 +27,11 @@ namespace CORC
         private const int MESSAGE_SIZE = 255; //Messages (frame) size in bytes
         private const int EXPECTED_DOUBLE_SIZE = 8; //Size expected for the doubles: will be checked at startup and should be same on server and client size
         private const int CMD_SIZE = 4; //Commands length in chars
-        private int MaxNbValues = (int)Math.Floor((MESSAGE_SIZE - 3 - CMD_SIZE) / (float)sizeof(double));
+        private const int CONNECT_TIMEOUT_MS = 2000;
+        private const int RECEIVE_TIMEOUT_MS = 3000;
+        private int MaxNbValues = (int)Math.Floor((MESSAGE_SIZE - 3 - CMD_SIZE) / (float)sizeof(double)); // Maximum number of double values that can be sent in a message (frame)
+        // (A packet can contain at most 31 doubles. The reserved bytes are header/type, count, four command characters, and checksum.)
+
         private const char InitValueCode = 'V';
         private const char InitCmdCode = 'C';
         private readonly ConcurrentQueue<FLNLCmd> _cmdQueue = new();
@@ -44,17 +49,27 @@ namespace CORC
         private bool Connected = false;
         private bool Logging = false;
         public StreamWriter LogFileStream;
+        private int csvLogBlockIndex = 0;
+        private int csvLogSectionIndex = 0;
 
 
         public FLNLClient()
         {
-            client = new TcpClient();
+            client = CreateClient();
+        }
+
+        private TcpClient CreateClient()
+        {
+            var tcpClient = new TcpClient();
             //Set buffers size to message size
-            client.Client.ReceiveBufferSize = MESSAGE_SIZE * 100; //Ensure enough space to avoide packets bouncing (and associated accumulation of old packets=> discard)
-            client.Client.SendBufferSize = MESSAGE_SIZE;
-            client.Client.NoDelay = true;
+            tcpClient.Client.ReceiveBufferSize = MESSAGE_SIZE * 100; //Ensure enough space to avoide packets bouncing (and associated accumulation of old packets=> discard)
+            tcpClient.Client.SendBufferSize = MESSAGE_SIZE;
+            tcpClient.Client.NoDelay = true;
+            tcpClient.ReceiveTimeout = RECEIVE_TIMEOUT_MS;
+            tcpClient.SendTimeout = CONNECT_TIMEOUT_MS;
             //timeout when connection is closed to 1s
-            client.Client.LingerState = new LingerOption(true, 1);
+            tcpClient.Client.LingerState = new LingerOption(true, 1);
+            return tcpClient;
         }
 
         ~FLNLClient()
@@ -73,7 +88,7 @@ namespace CORC
             try
             {
                 //client.Connect(ip, Port);
-                client.ConnectAsync(ip, Port).Wait(TimeSpan.FromSeconds(2)); //async (not really) used only to specify a timeoout
+                client.ConnectAsync(ip, Port).Wait(TimeSpan.FromMilliseconds(CONNECT_TIMEOUT_MS)); //async (not really) used only to specify a timeoout
             }
             catch (SocketException)
             {
@@ -103,11 +118,11 @@ namespace CORC
         {
             Connected = false;
             Thread.Sleep(100);
-            client.Close();
+            try { client.Close(); } catch { }
             if (receptionThread != null)
                 receptionThread.Abort();
             //Prepare a new client if re-connection required
-            client = new TcpClient();
+            client = CreateClient();
         }
 
         public bool IsConnected()
@@ -130,6 +145,12 @@ namespace CORC
                 LogFileStream?.Dispose();
             }
             return Logging;
+        }
+
+        public void SetCsvLogContext(int blockIndex, int sectionIndex)
+        {
+            Interlocked.Exchange(ref csvLogBlockIndex, blockIndex);
+            Interlocked.Exchange(ref csvLogSectionIndex, sectionIndex);
         }
 
         private void MarkDisconnected(string context, Exception ex = null)
@@ -333,7 +354,11 @@ namespace CORC
                     {
                         // ReadExact ensures we read a full message (frame) of MESSAGE_SIZE bytes, 
                         // otherwise we consider the connection is closed (break) 
-                        if (!ReadExact(stream, bytes, MESSAGE_SIZE)) break;
+                        if (!ReadExact(stream, bytes, MESSAGE_SIZE))
+                        {
+                            MarkDisconnected("incomplete frame / connection closed");
+                            break;
+                        }
 
                         if (bytes[MESSAGE_SIZE - 1] != Checksum(bytes))
                         {
@@ -350,9 +375,13 @@ namespace CORC
                             IsValues = true;
                             if (Logging)
                             {
-                                for (int i = 0; i < nbValuesToReceive - 1; i++)
-                                    LogFileStream.Write((float)ReceivedValues[i] + ",");
-                                LogFileStream.Write((float)ReceivedValues[nbValuesToReceive - 1] + "\n");
+                                var line = new StringBuilder();
+                                line.Append((float)ReceivedValues[0]);
+                                for (int i = 1; i < nbValuesToReceive; i++)
+                                    line.Append(',').Append((float)ReceivedValues[i]);
+                                line.Append(',').Append(Interlocked.CompareExchange(ref csvLogBlockIndex, 0, 0));
+                                line.Append(',').Append(Interlocked.CompareExchange(ref csvLogSectionIndex, 0, 0));
+                                LogFileStream.WriteLine(line.ToString());
                             }
                         }
                         else if (bytes[0] == InitCmdCode)

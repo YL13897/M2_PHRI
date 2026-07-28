@@ -1,4 +1,4 @@
-// Minimal 3D follower with explicit X mapping for M2 -> Unity rover alignment.
+// Minimal 3D follower for M2-to-Unity rover alignment.
 using UnityEngine;
 using CORC.Demo;
 
@@ -9,80 +9,87 @@ public class M2WorldFollower : MonoBehaviour
     public M2RoverBridge bridge;
     public Transform marker;
     public Rigidbody markerRb;
+    private RoverHandler rover;
 
-    [Header("X Mapping (exact)")]
-    [Tooltip("Unity X range.")]
-    public float unityXMin = -10f;
-    public float unityXMax = 10f;
-    [Tooltip("Mapped M2 X range in meters.")]
-    public float m2XMin = 0.2f;
-    public float m2XMax = 0.44f;
-    [Tooltip("Reference center: M2 A point and Unity center line.")]
-    public float m2CenterX = 0.32f;
+    [Header("Unity Mapping")]
+    private const float UnityXMin = -4.5f;
+    private const float UnityXMax = 4.5f;
     public float unityCenterX = 0f;
 
     [Header("Motion")]
-    [Range(0f, 1f)] public float smooth = 0.25f; // smoothness factor for position updates
-    [Tooltip("How quickly sync bias follows disturbance-induced offset in M2+HRI+POS mode.")]
-    public float biasFollowRate = 10f;
-    [Tooltip("How quickly sync bias returns to zero after disturbance in M2+HRI+POS mode.")]
+    [Range(0f, 1f)] public float smooth = 0f; // smoothness factor for position updates
+    [Tooltip("How quickly sync bias returns to zero after disturbance.")]
     public float biasRecoverRate = 4f;
+    [Tooltip("Clamp on disturbance-induced Unity X bias.")]
+    [Range(0f, 10f)] public float maxBias = 2.5f;
 
     private Vector3 lastPos;
-    private float syncXBias = 0f; // additional bias to apply to Unity X to follow M2 position when HRI disturbance is active
+    private float syncXBias = 0f; // disturbance-induced x offset from nominal mapping
+    private bool hasBiasBase = false;
+    private float biasBaseX = 0f;
 
     void Awake()
     {
         if (marker == null) marker = transform;
         if (markerRb == null && marker != null) markerRb = marker.GetComponent<Rigidbody>();
         if (bridge == null) bridge = FindFirstObjectByType<M2RoverBridge>();
+        rover = marker != null ? marker.GetComponent<RoverHandler>() : null;
+        if (rover == null && bridge != null) rover = bridge.rover;
+        if (rover != null)
+        {
+            rover.minX = UnityXMin;
+            rover.maxX = UnityXMax;
+        }
     }
 
     void FixedUpdate()
     {
-        if (m2 == null || marker == null || !m2.IsInitialised() || m2.Client == null || !m2.Client.IsConnected()) return;
+        if (marker == null || markerRb == null) return;
 
-        if (m2.State == null || m2.State["X"] == null || m2.State["X"].Length < 1) return;
-
-        float m2X = (float)m2.State["X"][0];
-
-        // VEL mode uses velocity mapping and should not position-sync rover.
-        if (IsM2VelMode())
+        if (IsKeyboardMode())
         {
-            syncXBias = 0f;
+            if (rover != null) rover.enableBoundaryClamp = true;
+            ApplyKeyboardBias();
             return;
         }
 
-        float nominalX = MapM2XToUnityX(m2X);
+        if (m2 == null || !m2.IsInitialised() || m2.Client == null || !m2.Client.IsConnected()) return;
+        if (m2.State == null || m2.State["X"] == null || m2.State["X"].Length == 0) return;
 
-        // POS+HRI mode with disturbance: apply additional bias to sync Unity X with M2's position changes due to HRI disturbance. Otherwise, smoothly recover bias to zero.
-        if (IsM2HriPosMode())
+        float m2X = (float)m2.State["X"][0];
+        if (float.IsNaN(m2X) || float.IsInfinity(m2X)) return;
+
+        if (rover != null) rover.enableBoundaryClamp = false;
+        float nominalX = MapM2ToUnityX(m2X);
+
+        // HRI mode maps stiffness to disturbance-induced bias.
+        if (IsM2HriMode())
         {
-            if (IsHriPosDisturbanceActive())
+            if (IsHriDisturbanceActive())
             {
-                // Compute the desired bias: current marker x-position relative to the nominal reference
-                float desiredBias = marker.position.x - nominalX;
-                // Compute smoothing factor (alpha) based on follow rate and physics timestep. 
-                // Clamp to [0,1] to ensure stable interpolation
-                float biasAlpha = Mathf.Clamp01(biasFollowRate * Time.fixedDeltaTime);
-                // Smoothly update the synchronized bias using linear interpolation (exponential smoothing)
-                // This gradually moves syncXBias toward desiredBias instead of jumping instantly.
-                syncXBias = Mathf.Lerp(syncXBias, desiredBias, biasAlpha);
+                int dir = ExperimentBlockControl.Instance != null ? ExperimentBlockControl.Instance.CurrentDirection : 0;
+                float k = bridge != null ? bridge.StiffnessCmd : 0f;
+                float k01 = bridge != null
+                    ? Mathf.InverseLerp(bridge.StiffnessMin, bridge.StiffnessMax, k)
+                    : 0f;
+                syncXBias = dir * maxBias * (1f - k01);
             }
             else
             {
                 float recoverAlpha = Mathf.Clamp01(biasRecoverRate * Time.fixedDeltaTime);
                 syncXBias = Mathf.Lerp(syncXBias, 0f, recoverAlpha);
             }
-        }
 
-        // If not in POS+HRI mode, or if there is no disturbance, just reset bias to zero.
+            syncXBias = Mathf.Clamp(syncXBias, -maxBias, maxBias);
+        }
         else
         {
             syncXBias = 0f;
         }
+        hasBiasBase = false;
 
         float targetX = nominalX + syncXBias;
+        rover?.UpdateBoundaryContact(targetX, UnityXMin, UnityXMax);
         Vector3 target = BuildTargetPosition(targetX);
         
         ApplySmoothPosition(target);
@@ -96,43 +103,84 @@ public class M2WorldFollower : MonoBehaviour
         return new Vector3(worldX, yWorld, marker.position.z);
     }
 
-    // Center-preserving linear map. By default this does NOT clamp input range.
-    private float MapM2XToUnityX(float m2X)
+    // Map A to the Unity center while preserving both M2 workspace boundaries.
+    private float MapM2ToUnityX(float m2X)
     {
-        float denom = Mathf.Max(1e-6f, m2XMax - m2XMin);
+        float m2Min = bridge != null ? bridge.M2BoundaryMin : 0.20f;
+        float m2Max = bridge != null ? bridge.M2BoundaryMax : 0.44f;
+        float m2Center = bridge != null ? bridge.M2Center : 0.32f;
 
-        float m2Input = m2X;
+        if (m2X <= m2Center)
+        {
+            float range = m2Center - m2Min;
+            return range > 1e-6f
+                ? UnityXMin + (unityCenterX - UnityXMin) * ((m2X - m2Min) / range)
+                : unityCenterX;
+        }
 
-        // Pure linear scaling around center: m2CenterX -> unityCenterX.
-        float slope = (unityXMax - unityXMin) / denom;
-        return unityCenterX + (m2Input - m2CenterX) * slope;
+        float rightRange = m2Max - m2Center;
+        return rightRange > 1e-6f
+            ? unityCenterX + (UnityXMax - unityCenterX) * ((m2X - m2Center) / rightRange)
+            : unityCenterX;
     }
 
-    private bool IsM2HriPosMode()
+    private bool IsM2HriMode()
     {
         if (bridge == null) return false;
         if (bridge.unityMode != M2RoverBridge.UnityDriveMode.Mode2_M2) return false;
         if (bridge.hriModeCode != 1) return false;
-        if (bridge.ctrlModeCode != 1) return false;
         return true;
     }
 
-    private bool IsM2VelMode()
+    private bool IsKeyboardMode()
     {
-        if (bridge == null) return false;
-        if (bridge.unityMode != M2RoverBridge.UnityDriveMode.Mode2_M2) return false;
-        return bridge.ctrlModeCode == 2;
+        return bridge != null && bridge.unityMode == M2RoverBridge.UnityDriveMode.Mode1_Keyboard;
     }
 
-    private bool IsHriPosDisturbanceActive()
+    private bool IsHriDisturbanceActive()
     {
-        if (!IsM2HriPosMode()) return false;
+        if (!IsM2HriMode()) return false;
         return ForceField.DisturbanceU > 0.5f;
     }
 
     public void ResetBias()
     {
         syncXBias = 0f;
+        lastPos = Vector3.zero;
+        hasBiasBase = false;
+    }
+
+    private void ApplyKeyboardBias()
+    {
+        bool active = ForceField.DisturbanceU > 0.5f;
+        if (active)
+        {
+            if (!hasBiasBase)
+            {
+                biasBaseX = markerRb.position.x;
+                lastPos = markerRb.position;
+                hasBiasBase = true;
+            }
+
+            int dir = ExperimentBlockControl.Instance != null ? ExperimentBlockControl.Instance.CurrentDirection : 0;
+            if (dir == 0) dir = 1;
+            syncXBias = dir * maxBias;
+        }
+        else
+        {
+            float recoverAlpha = Mathf.Clamp01(biasRecoverRate * Time.fixedDeltaTime);
+            syncXBias = Mathf.Lerp(syncXBias, 0f, recoverAlpha);
+            if (Mathf.Abs(syncXBias) < 1e-3f)
+            {
+                syncXBias = 0f;
+                hasBiasBase = false;
+                return;
+            }
+        }
+
+        if (!hasBiasBase) return;
+        Vector3 target = BuildTargetPosition(biasBaseX + Mathf.Clamp(syncXBias, -maxBias, maxBias));
+        ApplySmoothPosition(target);
     }
 
     // ApplySmoothPosition: Smoothly move the marker towards the target position. The 'smooth' parameter controls the responsiveness.
