@@ -513,7 +513,7 @@ void M2ProbMoveState::duringCode() {
     if (disturbanceActive_ && disturbanceExpireAt_ >= 0.0 && running() >= disturbanceExpireAt_) {
         disturbanceActive_ = false;
         disturbanceExpireAt_ = -1.0;
-        spdlog::warn("Disturbance auto-off triggered after {:.3f}s fallback window", disturbanceAutoOffSec_);
+        // spdlog::warn("Disturbance auto-off triggered after {:.3f}s fallback window", disturbanceAutoOffSec_);
     }
 
     // Phase controller: TO_A -> WAIT_START -> TRIAL
