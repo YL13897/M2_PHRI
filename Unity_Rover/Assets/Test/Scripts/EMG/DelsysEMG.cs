@@ -1,4 +1,4 @@
-/======= Copyright (c) Melbourne Robotics Lab, All rights reserved. ===============
+//======= Copyright (c) Melbourne Robotics Lab, All rights reserved. ===============
 using System.Collections.Generic;
 
 // TCP includes

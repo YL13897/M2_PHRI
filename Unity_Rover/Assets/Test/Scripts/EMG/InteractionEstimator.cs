@@ -535,7 +535,7 @@ namespace CORC.Demo
                     debugEmgSlots[activeIndex++] = i;
                     header.Append($",u_ch{configuredChannels[i]}");
                 }
-                header.Append(",p,n,spi,force_emg_proxy,force_sensor_x,k,emg_score,fsr_voltage,grasp_force_N");
+                header.Append(",p,n,spi,force_emg_proxy,force_sensor_x,emg_score,fsr_voltage,grasp_force_N");
 
                 if (!append)
                     debugWriter.WriteLine(header);
@@ -560,7 +560,6 @@ namespace CORC.Demo
             row.Append(',').Append(Spi.ToString("F6", CultureInfo.InvariantCulture));
             row.Append(',').Append(proxyText);
             row.Append(',').Append(sensorText);
-            row.Append(',').Append(StiffnessCmd.ToString("F6", CultureInfo.InvariantCulture));
             row.Append(',').Append(EmgScore.ToString("F6", CultureInfo.InvariantCulture));
             row.Append(',').Append(fsrVoltageText);
             row.Append(',').Append(graspForceText);
