@@ -86,6 +86,7 @@ static constexpr double Y_MIN = 0.10;
 static constexpr double Y_MAX = 0.38;
 static constexpr double HOLD_POS_EPS = 0.02;
 static constexpr double HOLD_VEL_EPS = 0.05;
+static constexpr int HIGH_SPEED_CONFIRM_SAMPLES = 3;
 
 static inline VM2 clampA(double x, double y) {
     if (!std::isfinite(x)) x = 0.32;
@@ -612,6 +613,7 @@ void M2ProbMoveState::duringCode() {
                 // Simulate entryCode() for TRIAL
                 trialStartTime = running();
                 safetyTripped = false;
+                highSpeedCount_ = 0;
                 ++trialIndex_;
 
                 if (machine && machine->UIserver) {
@@ -651,11 +653,25 @@ void M2ProbMoveState::duringCode() {
                 robot->setEndEffVelocity(VM2::Zero());
                 cmdEffort = 0.0;
             } else if (dX.norm() > 1.5) {
-                safetyTripped = true;
-                spdlog::error("PROBMOVE SAFETY TRIP: Speed {:.2f}m/s > 1.5m/s! Latching velocity OFF.", dX.norm());
+                if (highSpeedCount_ < HIGH_SPEED_CONFIRM_SAMPLES) {
+                    ++highSpeedCount_;
+                    if (highSpeedCount_ == HIGH_SPEED_CONFIRM_SAMPLES) {
+                        spdlog::warn(
+                            "PROBMOVE: High speed confirmed ({:.2f}m/s); "
+                            "holding zero velocity.", dX.norm());
+                    }
+                }
+                robot->setEndEffVelocity(VM2::Zero());
+                cmdEffort = 0.0;
+            } else if (highSpeedCount_ >= HIGH_SPEED_CONFIRM_SAMPLES &&
+                       dX.norm() >= std::abs(admVelLimit)) {
                 robot->setEndEffVelocity(VM2::Zero());
                 cmdEffort = 0.0;
             } else {
+                if (highSpeedCount_ >= HIGH_SPEED_CONFIRM_SAMPLES)
+                    spdlog::info("PROBMOVE: Admittance resumed at {:.2f}m/s.", dX.norm());
+                highSpeedCount_ = 0;
+
                 VM2 Fs = F_interaction + F_cmd;
                 VM2 Vadm = myVE(dX, Fs, admB, admM, dt());
                 VM2 Vd = VM2::Zero();

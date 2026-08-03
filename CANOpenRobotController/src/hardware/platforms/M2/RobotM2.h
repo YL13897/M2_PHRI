@@ -34,6 +34,7 @@ class RobotM2: public Robot {
     bool calibrated;
     double maxEndEffVel; //!< Maximal end-effector allowable velocity. Used in checkSafety when robot is calibrated.
     double maxEndEffForce; //!< Maximal end-effector allowable force. Used in checkSafety when robot is calibrated.
+    int overspeedSamples = 0;
 
     VX endEffPositions;
     VX endEffVelocities;

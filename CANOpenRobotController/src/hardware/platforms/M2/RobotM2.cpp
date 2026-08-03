@@ -120,10 +120,35 @@ void RobotM2::updateRobot() {
 setMovementReturnCode_t RobotM2::safetyCheck() {
     //End-effector safeties if calibrated
     if (calibrated) {
-        if (getEndEffVelocity().norm() > maxEndEffVel) {
-            spdlog::error("M2: Max velocity reached ({}m.s-1)!", getEndEffVelocity().norm());
+        const VX& velocity = getEndEffVelocity();
+        if (!std::isfinite(velocity(0)) || !std::isfinite(velocity(1))) {
+            spdlog::error("M2: Velocity feedback is not finite!");
             return OUTSIDE_LIMITS;
         }
+
+        const double speed = velocity.norm();
+        if (speed > maxEndEffVel) {
+            ++overspeedSamples;
+            if (overspeedSamples >= 3) {
+                spdlog::error(
+                    "M2: Max velocity confirmed ({:.2f}m/s, {}/3 samples)!",
+                    speed, overspeedSamples);
+                return OUTSIDE_LIMITS;
+            }
+
+            if (setEndEffVelocity(VM2::Zero()) != SUCCESS) {
+                spdlog::error(
+                    "M2: Failed to command zero after suspect velocity ({:.2f}m/s)!",
+                    speed);
+                return OUTSIDE_LIMITS;
+            }
+            spdlog::warn(
+                "M2: Suspect velocity sample {}/3 ({:.2f}m/s); commanding zero.",
+                overspeedSamples, speed);
+        } else {
+            overspeedSamples = 0;
+        }
+
         if(interactionForces.norm()>maxEndEffForce) {
            spdlog::error("M2: Max force reached ({}N)!", interactionForces.norm());
            return OUTSIDE_LIMITS;

@@ -115,7 +115,7 @@ class M2ProbMoveState : public M2TimedState {
 
         // --- Force config ---
         double forceSaturation   = 80.0;
-        bool trialCsvEnabled_ = true;
+        bool trialCsvEnabled_ = false;
 
         // --- Trial admittance control ---
         double admM = 0.8;
@@ -163,6 +163,7 @@ class M2ProbMoveState : public M2TimedState {
         bool initTrial = true;
         bool holdActive_ = false;
         bool admittanceActive_ = false;
+        int highSpeedCount_ = 0;
         bool pendingStart = false;  // captured TRBG; consumed only in WAIT_START
         bool rwstAckPending_ = false; // defer RWOK until TO_A has reached A and entered WAIT_START
         
